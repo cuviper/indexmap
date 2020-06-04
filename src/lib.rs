@@ -53,8 +53,9 @@
 //! [def]: map/struct.IndexMap.html#impl-Default
 
 #[cfg(not(has_std))]
-#[macro_use(vec)]
 extern crate alloc;
+
+extern crate hashbrown;
 
 #[cfg(not(has_std))]
 pub(crate) mod std {
@@ -102,8 +103,8 @@ struct HashValue(usize);
 
 impl HashValue {
     #[inline(always)]
-    fn get(self) -> usize {
-        self.0
+    fn get(self) -> u64 {
+        self.0 as u64
     }
 }
 
