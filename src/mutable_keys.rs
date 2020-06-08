@@ -1,6 +1,7 @@
 use std::hash::BuildHasher;
 use std::hash::Hash;
 
+use map_core::Index;
 use super::{Equivalent, IndexMap};
 
 pub struct PrivateMarker {}
@@ -17,7 +18,7 @@ pub struct PrivateMarker {}
 /// implementing PartialEq, Eq, or Hash incorrectly would be).
 ///
 /// `use` this trait to enable its methods for `IndexMap`.
-pub trait MutableKeys {
+pub trait MutableKeys<Idx = usize> {
     type Key;
     type Value;
 
@@ -25,7 +26,7 @@ pub trait MutableKeys {
     fn get_full_mut2<Q: ?Sized>(
         &mut self,
         key: &Q,
-    ) -> Option<(usize, &mut Self::Key, &mut Self::Value)>
+    ) -> Option<(Idx, &mut Self::Key, &mut Self::Value)>
     where
         Q: Hash + Equivalent<Self::Key>;
 
@@ -49,14 +50,15 @@ pub trait MutableKeys {
 /// Opt-in mutable access to keys.
 ///
 /// See [`MutableKeys`](trait.MutableKeys.html) for more information.
-impl<K, V, S> MutableKeys for IndexMap<K, V, S>
+impl<K, V, S, Idx> MutableKeys<Idx> for IndexMap<K, V, S, Idx>
 where
     K: Eq + Hash,
     S: BuildHasher,
+    Idx: Index,
 {
     type Key = K;
     type Value = V;
-    fn get_full_mut2<Q: ?Sized>(&mut self, key: &Q) -> Option<(usize, &mut K, &mut V)>
+    fn get_full_mut2<Q: ?Sized>(&mut self, key: &Q) -> Option<(Idx, &mut K, &mut V)>
     where
         Q: Hash + Equivalent<K>,
     {

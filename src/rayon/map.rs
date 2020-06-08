@@ -14,16 +14,18 @@ use std::fmt;
 use std::hash::BuildHasher;
 use std::hash::Hash;
 
+use map_core::Index;
 use Bucket;
 use Entries;
 use IndexMap;
 
 /// Requires crate feature `"rayon"`.
-impl<K, V, S> IntoParallelIterator for IndexMap<K, V, S>
+impl<K, V, S, Idx> IntoParallelIterator for IndexMap<K, V, S, Idx>
 where
     K: Hash + Eq + Send,
     V: Send,
     S: BuildHasher,
+    Idx: Index,
 {
     type Item = (K, V);
     type Iter = IntoParIter<K, V>;
@@ -64,11 +66,12 @@ impl<K: Send, V: Send> IndexedParallelIterator for IntoParIter<K, V> {
 }
 
 /// Requires crate feature `"rayon"`.
-impl<'a, K, V, S> IntoParallelIterator for &'a IndexMap<K, V, S>
+impl<'a, K, V, S, Idx> IntoParallelIterator for &'a IndexMap<K, V, S, Idx>
 where
     K: Hash + Eq + Sync,
     V: Sync,
     S: BuildHasher,
+    Idx: Index,
 {
     type Item = (&'a K, &'a V);
     type Iter = ParIter<'a, K, V>;
@@ -115,11 +118,12 @@ impl<'a, K: Sync, V: Sync> IndexedParallelIterator for ParIter<'a, K, V> {
 }
 
 /// Requires crate feature `"rayon"`.
-impl<'a, K, V, S> IntoParallelIterator for &'a mut IndexMap<K, V, S>
+impl<'a, K, V, S, Idx> IntoParallelIterator for &'a mut IndexMap<K, V, S, Idx>
 where
     K: Hash + Eq + Sync + Send,
     V: Send,
     S: BuildHasher,
+    Idx: Index,
 {
     type Item = (&'a K, &'a mut V);
     type Iter = ParIterMut<'a, K, V>;
@@ -157,11 +161,12 @@ impl<'a, K: Sync + Send, V: Send> IndexedParallelIterator for ParIterMut<'a, K, 
 /// The following methods **require crate feature `"rayon"`**.
 ///
 /// See also the `IntoParallelIterator` implementations.
-impl<K, V, S> IndexMap<K, V, S>
+impl<K, V, S, Idx> IndexMap<K, V, S, Idx>
 where
     K: Hash + Eq + Sync,
     V: Sync,
     S: BuildHasher,
+    Idx: Index,
 {
     /// Return a parallel iterator over the keys of the map.
     ///
@@ -185,7 +190,7 @@ where
 
     /// Returns `true` if `self` contains all of the same key-value pairs as `other`,
     /// regardless of each map's indexed order, determined in parallel.
-    pub fn par_eq<V2, S2>(&self, other: &IndexMap<K, V2, S2>) -> bool
+    pub fn par_eq<V2, S2>(&self, other: &IndexMap<K, V2, S2, Idx>) -> bool
     where
         V: PartialEq<V2>,
         V2: Sync,
@@ -267,11 +272,12 @@ impl<'a, K: Sync, V: Sync> IndexedParallelIterator for ParValues<'a, K, V> {
 }
 
 /// Requires crate feature `"rayon"`.
-impl<K, V, S> IndexMap<K, V, S>
+impl<K, V, S, Idx> IndexMap<K, V, S, Idx>
 where
     K: Hash + Eq + Send,
     V: Send,
     S: BuildHasher,
+    Idx: Index,
 {
     /// Return a parallel iterator over mutable references to the the values of the map
     ///
@@ -341,11 +347,12 @@ impl<'a, K: Send, V: Send> IndexedParallelIterator for ParValuesMut<'a, K, V> {
 }
 
 /// Requires crate feature `"rayon"`.
-impl<K, V, S> FromParallelIterator<(K, V)> for IndexMap<K, V, S>
+impl<K, V, S, Idx> FromParallelIterator<(K, V)> for IndexMap<K, V, S, Idx>
 where
     K: Eq + Hash + Send,
     V: Send,
     S: BuildHasher + Default + Send,
+    Idx: Index,
 {
     fn from_par_iter<I>(iter: I) -> Self
     where
@@ -362,11 +369,12 @@ where
 }
 
 /// Requires crate feature `"rayon"`.
-impl<K, V, S> ParallelExtend<(K, V)> for IndexMap<K, V, S>
+impl<K, V, S, Idx> ParallelExtend<(K, V)> for IndexMap<K, V, S, Idx>
 where
     K: Eq + Hash + Send,
     V: Send,
     S: BuildHasher + Send,
+    Idx: Index,
 {
     fn par_extend<I>(&mut self, iter: I)
     where
@@ -379,11 +387,12 @@ where
 }
 
 /// Requires crate feature `"rayon"`.
-impl<'a, K: 'a, V: 'a, S> ParallelExtend<(&'a K, &'a V)> for IndexMap<K, V, S>
+impl<'a, K: 'a, V: 'a, S, Idx> ParallelExtend<(&'a K, &'a V)> for IndexMap<K, V, S, Idx>
 where
     K: Copy + Eq + Hash + Send + Sync,
     V: Copy + Send + Sync,
     S: BuildHasher + Send,
+    Idx: Index,
 {
     fn par_extend<I>(&mut self, iter: I)
     where

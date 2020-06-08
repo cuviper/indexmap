@@ -10,14 +10,16 @@ use std::fmt::{self, Formatter};
 use std::hash::{BuildHasher, Hash};
 use std::marker::PhantomData;
 
+use map_core::Index;
 use IndexMap;
 
 /// Requires crate feature `"serde-1"`
-impl<K, V, S> Serialize for IndexMap<K, V, S>
+impl<K, V, S, Idx> Serialize for IndexMap<K, V, S, Idx>
 where
     K: Serialize + Hash + Eq,
     V: Serialize,
     S: BuildHasher,
+    Idx: Index,
 {
     fn serialize<T>(&self, serializer: T) -> Result<T::Ok, T::Error>
     where
@@ -31,15 +33,16 @@ where
     }
 }
 
-struct IndexMapVisitor<K, V, S>(PhantomData<(K, V, S)>);
+struct IndexMapVisitor<K, V, S, Idx>(PhantomData<(K, V, S, Idx)>);
 
-impl<'de, K, V, S> Visitor<'de> for IndexMapVisitor<K, V, S>
+impl<'de, K, V, S, Idx> Visitor<'de> for IndexMapVisitor<K, V, S, Idx>
 where
     K: Deserialize<'de> + Eq + Hash,
     V: Deserialize<'de>,
     S: Default + BuildHasher,
+    Idx: Index,
 {
-    type Value = IndexMap<K, V, S>;
+    type Value = IndexMap<K, V, S, Idx>;
 
     fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
         write!(formatter, "a map")
@@ -61,11 +64,12 @@ where
 }
 
 /// Requires crate feature `"serde-1"`
-impl<'de, K, V, S> Deserialize<'de> for IndexMap<K, V, S>
+impl<'de, K, V, S, Idx> Deserialize<'de> for IndexMap<K, V, S, Idx>
 where
     K: Deserialize<'de> + Eq + Hash,
     V: Deserialize<'de>,
     S: Default + BuildHasher,
+    Idx: Index,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -75,11 +79,12 @@ where
     }
 }
 
-impl<'de, K, V, S, E> IntoDeserializer<'de, E> for IndexMap<K, V, S>
+impl<'de, K, V, S, Idx, E> IntoDeserializer<'de, E> for IndexMap<K, V, S, Idx>
 where
     K: IntoDeserializer<'de, E> + Eq + Hash,
     V: IntoDeserializer<'de, E>,
     S: BuildHasher,
+    Idx: Index,
     E: Error,
 {
     type Deserializer = MapDeserializer<'de, <Self as IntoIterator>::IntoIter, E>;
@@ -92,10 +97,11 @@ where
 use IndexSet;
 
 /// Requires crate feature `"serde-1"`
-impl<T, S> Serialize for IndexSet<T, S>
+impl<T, S, Idx> Serialize for IndexSet<T, S, Idx>
 where
     T: Serialize + Hash + Eq,
     S: BuildHasher,
+    Idx: Index,
 {
     fn serialize<Se>(&self, serializer: Se) -> Result<Se::Ok, Se::Error>
     where
@@ -109,14 +115,15 @@ where
     }
 }
 
-struct IndexSetVisitor<T, S>(PhantomData<(T, S)>);
+struct IndexSetVisitor<T, S, Idx>(PhantomData<(T, S, Idx)>);
 
-impl<'de, T, S> Visitor<'de> for IndexSetVisitor<T, S>
+impl<'de, T, S, Idx> Visitor<'de> for IndexSetVisitor<T, S, Idx>
 where
     T: Deserialize<'de> + Eq + Hash,
     S: Default + BuildHasher,
+    Idx: Index,
 {
-    type Value = IndexSet<T, S>;
+    type Value = IndexSet<T, S, Idx>;
 
     fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
         write!(formatter, "a set")
@@ -138,10 +145,11 @@ where
 }
 
 /// Requires crate feature `"serde-1"`
-impl<'de, T, S> Deserialize<'de> for IndexSet<T, S>
+impl<'de, T, S, Idx> Deserialize<'de> for IndexSet<T, S, Idx>
 where
     T: Deserialize<'de> + Eq + Hash,
     S: Default + BuildHasher,
+    Idx: Index,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -151,10 +159,11 @@ where
     }
 }
 
-impl<'de, T, S, E> IntoDeserializer<'de, E> for IndexSet<T, S>
+impl<'de, T, S, Idx, E> IntoDeserializer<'de, E> for IndexSet<T, S, Idx>
 where
     T: IntoDeserializer<'de, E> + Eq + Hash,
     S: BuildHasher,
+    Idx: Index,
     E: Error,
 {
     type Deserializer = SeqDeserializer<<Self as IntoIterator>::IntoIter, E>;
