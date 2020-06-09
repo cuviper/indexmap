@@ -88,10 +88,10 @@ where
     V: fmt::Debug,
     Idx: fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct DebugIndices<'a, Idx>(&'a RawTable<Idx>);
         impl<Idx: fmt::Debug> fmt::Debug for DebugIndices<'_, Idx> {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 let indices = unsafe { self.0.iter().map(|raw_bucket| raw_bucket.read()) };
                 f.debug_list().entries(indices).finish()
             }
@@ -163,7 +163,7 @@ impl<K, V, Idx: Index> IndexMapCore<K, V, Idx> {
         self.entries.clear();
     }
 
-    pub(crate) fn drain(&mut self, range: RangeFull) -> Drain<Bucket<K, V>> {
+    pub(crate) fn drain(&mut self, range: RangeFull) -> Drain<'_, Bucket<K, V>> {
         self.indices.clear_no_drop();
         self.entries.drain(range)
     }
@@ -237,7 +237,7 @@ impl<K, V, Idx: Index> IndexMapCore<K, V, Idx> {
         }
     }
 
-    pub(crate) fn entry(&mut self, hash: HashValue, key: K) -> Entry<K, V, Idx>
+    pub(crate) fn entry(&mut self, hash: HashValue, key: K) -> Entry<'_, K, V, Idx>
     where
         K: Eq,
     {
@@ -426,7 +426,7 @@ impl<K, V, Idx: Index> IndexMapCore<K, V, Idx> {
 
 /// Entry for an existing key-value pair or a vacant location to
 /// insert one.
-pub enum Entry<'a, K: 'a, V: 'a, Idx = usize> {
+pub enum Entry<'a, K, V, Idx = usize> {
     /// Existing slot with equivalent key.
     Occupied(OccupiedEntry<'a, K, V, Idx>),
     /// Vacant slot (no equivalent key in the map).
@@ -498,7 +498,7 @@ impl<'a, K, V, Idx: Index> Entry<'a, K, V, Idx> {
 }
 
 impl<'a, K: 'a + fmt::Debug, V: 'a + fmt::Debug, Idx: Index> fmt::Debug for Entry<'a, K, V, Idx> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Entry::Vacant(ref v) => f.debug_tuple(stringify!(Entry)).field(v).finish(),
             Entry::Occupied(ref o) => f.debug_tuple(stringify!(Entry)).field(o).finish(),
@@ -510,7 +510,7 @@ impl<'a, K: 'a + fmt::Debug, V: 'a + fmt::Debug, Idx: Index> fmt::Debug for Entr
 /// It is part of the [`Entry`] enum.
 ///
 /// [`Entry`]: enum.Entry.html
-pub struct OccupiedEntry<'a, K: 'a, V: 'a, Idx> {
+pub struct OccupiedEntry<'a, K, V, Idx> {
     map: &'a mut IndexMapCore<K, V, Idx>,
     raw_bucket: RawBucket<Idx>,
     key: K,
@@ -626,7 +626,7 @@ impl<'a, K, V, Idx: Index> OccupiedEntry<'a, K, V, Idx> {
 impl<'a, K: 'a + fmt::Debug, V: 'a + fmt::Debug, Idx: Index> fmt::Debug
     for OccupiedEntry<'a, K, V, Idx>
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(stringify!(OccupiedEntry))
             .field("key", self.key())
             .field("value", self.get())
@@ -638,7 +638,7 @@ impl<'a, K: 'a + fmt::Debug, V: 'a + fmt::Debug, Idx: Index> fmt::Debug
 /// It is part of the [`Entry`] enum.
 ///
 /// [`Entry`]: enum.Entry.html
-pub struct VacantEntry<'a, K: 'a, V: 'a, Idx> {
+pub struct VacantEntry<'a, K, V, Idx> {
     map: &'a mut IndexMapCore<K, V, Idx>,
     hash: HashValue,
     key: K,
@@ -665,7 +665,7 @@ impl<'a, K, V, Idx: Index> VacantEntry<'a, K, V, Idx> {
 }
 
 impl<'a, K: 'a + fmt::Debug, V: 'a, Idx: Index> fmt::Debug for VacantEntry<'a, K, V, Idx> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple(stringify!(VacantEntry))
             .field(self.key())
             .finish()

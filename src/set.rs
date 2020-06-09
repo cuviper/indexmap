@@ -122,7 +122,7 @@ where
     S: BuildHasher,
     Idx: Index + fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if cfg!(not(feature = "test_debug")) {
             f.debug_set().entries(self.iter()).finish()
         } else {
@@ -266,7 +266,7 @@ where
     }
 
     /// Return an iterator over the values of the set, in their order
-    pub fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             iter: self.map.keys().iter,
         }
@@ -572,7 +572,7 @@ where
 
     /// Clears the `IndexSet`, returning all values as a drain iterator.
     /// Keeps the allocated memory for reuse.
-    pub fn drain(&mut self, range: RangeFull) -> Drain<T> {
+    pub fn drain(&mut self, range: RangeFull) -> Drain<'_, T> {
         Drain {
             iter: self.map.drain(range).iter,
         }
@@ -646,7 +646,7 @@ impl<T> ExactSizeIterator for IntoIter<T> {
 }
 
 impl<T: fmt::Debug> fmt::Debug for IntoIter<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let iter = self.iter.as_slice().iter().map(Bucket::key_ref);
         f.debug_list().entries(iter).finish()
     }
@@ -659,7 +659,7 @@ impl<T: fmt::Debug> fmt::Debug for IntoIter<T> {
 ///
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`iter`]: struct.IndexSet.html#method.iter
-pub struct Iter<'a, T: 'a> {
+pub struct Iter<'a, T> {
     iter: slice::Iter<'a, Bucket<T>>,
 }
 
@@ -690,7 +690,7 @@ impl<'a, T> Clone for Iter<'a, T> {
 }
 
 impl<'a, T: fmt::Debug> fmt::Debug for Iter<'a, T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
     }
 }
@@ -702,7 +702,7 @@ impl<'a, T: fmt::Debug> fmt::Debug for Iter<'a, T> {
 ///
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`drain`]: struct.IndexSet.html#method.drain
-pub struct Drain<'a, T: 'a> {
+pub struct Drain<'a, T> {
     iter: vec::Drain<'a, Bucket<T>>,
 }
 
@@ -859,7 +859,7 @@ where
 ///
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`difference`]: struct.IndexSet.html#method.difference
-pub struct Difference<'a, T: 'a, S: 'a, Idx = usize> {
+pub struct Difference<'a, T, S, Idx = usize> {
     iter: Iter<'a, T>,
     other: &'a IndexSet<T, S, Idx>,
 }
@@ -917,7 +917,7 @@ where
     S: BuildHasher,
     Idx: Index,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
     }
 }
@@ -929,7 +929,7 @@ where
 ///
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`intersection`]: struct.IndexSet.html#method.intersection
-pub struct Intersection<'a, T: 'a, S: 'a, Idx = usize> {
+pub struct Intersection<'a, T, S, Idx = usize> {
     iter: Iter<'a, T>,
     other: &'a IndexSet<T, S, Idx>,
 }
@@ -987,7 +987,7 @@ where
     S: BuildHasher,
     Idx: Index,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
     }
 }
@@ -999,7 +999,7 @@ where
 ///
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`symmetric_difference`]: struct.IndexSet.html#method.symmetric_difference
-pub struct SymmetricDifference<'a, T: 'a, S1: 'a, S2: 'a, Idx = usize> {
+pub struct SymmetricDifference<'a, T, S1, S2, Idx = usize> {
     iter: Chain<Difference<'a, T, S2, Idx>, Difference<'a, T, S1, Idx>>,
 }
 
@@ -1055,7 +1055,7 @@ where
     S2: BuildHasher,
     Idx: Index,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
     }
 }
@@ -1067,7 +1067,7 @@ where
 ///
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`union`]: struct.IndexSet.html#method.union
-pub struct Union<'a, T: 'a, S: 'a, Idx = usize> {
+pub struct Union<'a, T, S, Idx = usize> {
     iter: Chain<Iter<'a, T>, Difference<'a, T, S, Idx>>,
 }
 
@@ -1120,7 +1120,7 @@ where
     S: BuildHasher,
     Idx: Index,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
     }
 }
