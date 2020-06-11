@@ -977,6 +977,34 @@ where
     }
 }
 
+impl<K, V, S, Idx: Index> ops::Index<usize> for IndexMap<K, V, S, Idx> {
+    type Output = V;
+
+    /// ***Panics*** if `index` is out of bounds.
+    fn index(&self, index: usize) -> &V {
+        &self
+            .as_entries()
+            .get(index)
+            .expect("IndexMap: index out of bounds")
+            .value
+    }
+}
+
+/// Mutable indexing allows changing / updating indexed values
+/// that are already present.
+///
+/// You can **not** insert new values with index syntax, use `.insert()`.
+impl<K, V, S, Idx: Index> ops::IndexMut<usize> for IndexMap<K, V, S, Idx> {
+    /// ***Panics*** if `index` is out of bounds.
+    fn index_mut(&mut self, index: usize) -> &mut V {
+        &mut self
+            .as_entries_mut()
+            .get_mut(index)
+            .expect("IndexMap: index out of bounds")
+            .value
+    }
+}
+
 impl<K, V, S, Idx> FromIterator<(K, V)> for IndexMap<K, V, S, Idx>
 where
     K: Hash + Eq,
@@ -1057,8 +1085,7 @@ where
     }
 }
 
-impl<K, V1, S1, V2, S2, Idx> PartialEq<IndexMap<K, V2, S2, Idx>>
-    for IndexMap<K, V1, S1, Idx>
+impl<K, V1, S1, V2, S2, Idx> PartialEq<IndexMap<K, V2, S2, Idx>> for IndexMap<K, V1, S1, Idx>
 where
     K: Hash + Eq,
     V1: PartialEq<V2>,

@@ -14,7 +14,7 @@ use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::iter::{Chain, FromIterator};
 use std::ops::RangeFull;
-use std::ops::{BitAnd, BitOr, BitXor, Sub};
+use std::ops::{self, BitAnd, BitOr, BitXor, Sub};
 use std::slice;
 use std::vec;
 
@@ -613,6 +613,19 @@ impl<T, S, Idx: Index> IndexSet<T, S, Idx> {
     /// Computes in **O(n)** time (average).
     pub fn shift_remove_index(&mut self, index: Idx) -> Option<T> {
         self.map.shift_remove_index(index).map(|(x, ())| x)
+    }
+}
+
+impl<T, S, Idx: Index> ops::Index<usize> for IndexSet<T, S, Idx> {
+    type Output = T;
+
+    /// ***Panics*** if `index` is out of bounds.
+    fn index(&self, index: usize) -> &T {
+        &self
+            .as_entries()
+            .get(index)
+            .expect("IndexSet: index out of bounds")
+            .key
     }
 }
 
