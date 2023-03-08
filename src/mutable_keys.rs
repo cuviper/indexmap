@@ -23,12 +23,10 @@ pub trait MutableKeys: private::Sealed {
     /// Return item index, mutable reference to key and value
     ///
     /// Computes in **O(1)** time (average).
-    fn get_full_mut2<Q: ?Sized>(
-        &mut self,
-        key: &Q,
-    ) -> Option<(usize, &mut Self::Key, &mut Self::Value)>
+    fn get_full_mut2<Q>(&mut self, key: &Q) -> Option<(usize, &mut Self::Key, &mut Self::Value)>
     where
-        Q: Hash + Equivalent<Self::Key>;
+        Self::Key: Equivalent<Q>,
+        Q: Hash + ?Sized;
 
     /// Return mutable reference to key and value at an index.
     ///
@@ -60,9 +58,10 @@ where
     type Key = K;
     type Value = V;
 
-    fn get_full_mut2<Q: ?Sized>(&mut self, key: &Q) -> Option<(usize, &mut K, &mut V)>
+    fn get_full_mut2<Q>(&mut self, key: &Q) -> Option<(usize, &mut K, &mut V)>
     where
-        Q: Hash + Equivalent<K>,
+        K: Equivalent<Q>,
+        Q: Hash + ?Sized,
     {
         if let Some(i) = self.get_index_of(key) {
             let entry = &mut self.as_entries_mut()[i];

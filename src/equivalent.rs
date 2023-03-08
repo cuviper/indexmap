@@ -9,19 +9,19 @@ use core::borrow::Borrow;
 ///
 /// # Contract
 ///
-/// The implementor **must** hash like `K`, if it is hashable.
-pub trait Equivalent<K: ?Sized> {
+/// The implementor **must** hash like `Q`, if it is hashable.
+pub trait Equivalent<Q: ?Sized> {
     /// Compare self to `key` and return `true` if they are equal.
-    fn equivalent(&self, key: &K) -> bool;
+    fn equivalent(&self, key: &Q) -> bool;
 }
 
-impl<Q: ?Sized, K: ?Sized> Equivalent<K> for Q
+impl<K: ?Sized, Q: ?Sized> Equivalent<Q> for K
 where
-    Q: Eq,
     K: Borrow<Q>,
+    Q: Eq,
 {
     #[inline]
-    fn equivalent(&self, key: &K) -> bool {
-        *self == *key.borrow()
+    fn equivalent(&self, key: &Q) -> bool {
+        PartialEq::eq(self.borrow(), key)
     }
 }

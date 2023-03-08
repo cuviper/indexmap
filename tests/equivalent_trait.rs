@@ -6,24 +6,15 @@ use std::hash::Hash;
 #[derive(Debug, Hash)]
 pub struct Pair<A, B>(pub A, pub B);
 
-impl<A, B, C, D> PartialEq<(A, B)> for Pair<C, D>
+impl<A, B, C, D> Equivalent<Pair<&A, &B>> for (C, D)
 where
-    C: PartialEq<A>,
-    D: PartialEq<B>,
+    A: ?Sized,
+    B: ?Sized,
+    C: Equivalent<A>,
+    D: Equivalent<B>,
 {
-    fn eq(&self, rhs: &(A, B)) -> bool {
-        self.0 == rhs.0 && self.1 == rhs.1
-    }
-}
-
-impl<A, B, X> Equivalent<X> for Pair<A, B>
-where
-    Pair<A, B>: PartialEq<X>,
-    A: Hash + Eq,
-    B: Hash + Eq,
-{
-    fn equivalent(&self, other: &X) -> bool {
-        *self == *other
+    fn equivalent(&self, key: &Pair<&A, &B>) -> bool {
+        self.0.equivalent(key.0) && self.1.equivalent(key.1)
     }
 }
 
