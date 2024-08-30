@@ -26,7 +26,7 @@ pub use entry::{Entry, IndexedEntry, OccupiedEntry, VacantEntry};
 /// Core of the map that does not depend on S
 pub(crate) struct IndexMapCore<K, V> {
     /// indices mapping from the entry hash to its index.
-    indices: RawTable<usize>,
+    indices: RawTable,
     /// entries is a dense vec of entries in their order.
     entries: Vec<Bucket<K, V>>,
 }
@@ -45,13 +45,13 @@ fn equivalent<'a, K, V, Q: ?Sized + Equivalent<K>>(
 }
 
 #[inline]
-fn erase_index(table: &mut RawTable<usize>, hash: HashValue, index: usize) {
+fn erase_index(table: &mut RawTable, hash: HashValue, index: usize) {
     let erased = table.erase_entry(hash.get(), move |&i| i == index);
     debug_assert!(erased);
 }
 
 #[inline]
-fn update_index(table: &mut RawTable<usize>, hash: HashValue, old: usize, new: usize) {
+fn update_index(table: &mut RawTable, hash: HashValue, old: usize, new: usize) {
     let index = table
         .get_mut(hash.get(), move |&i| i == old)
         .expect("index not found");

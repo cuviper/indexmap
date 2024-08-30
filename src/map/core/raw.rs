@@ -3,14 +3,13 @@
 //! mostly in dealing with its bucket "pointers".
 
 use super::{equivalent, get_hash, Bucket, HashValue, IndexMapCore};
+use crate::raw::Bucket as RawBucket;
 use crate::raw::RawTable;
-
-type RawBucket = crate::raw::Bucket<usize>;
 
 /// Inserts many entries into a raw table without reallocating.
 ///
 /// ***Panics*** if there is not sufficient capacity already.
-pub(super) fn insert_bulk_no_grow<K, V>(indices: &mut RawTable<usize>, entries: &[Bucket<K, V>]) {
+pub(super) fn insert_bulk_no_grow<K, V>(indices: &mut RawTable, entries: &[Bucket<K, V>]) {
     assert!(indices.capacity() - indices.len() >= entries.len());
     for entry in entries {
         // SAFETY: we asserted that sufficient capacity exists for all entries.
@@ -21,7 +20,7 @@ pub(super) fn insert_bulk_no_grow<K, V>(indices: &mut RawTable<usize>, entries: 
 }
 
 #[cfg(feature = "test_debug")]
-pub(super) struct DebugIndices<'a>(pub &'a RawTable<usize>);
+pub(super) struct DebugIndices<'a>(pub &'a RawTable);
 
 #[cfg(feature = "test_debug")]
 impl core::fmt::Debug for DebugIndices<'_> {
@@ -110,10 +109,6 @@ pub(super) struct RawTableEntry<'a, K, V> {
     map: &'a mut IndexMapCore<K, V>,
     raw_bucket: RawBucket,
 }
-
-// `hashbrown::raw::Bucket` is only `Send`, not `Sync`.
-// SAFETY: `&self` only accesses the bucket to read it.
-unsafe impl<K: Sync, V: Sync> Sync for RawTableEntry<'_, K, V> {}
 
 impl<'a, K, V> RawTableEntry<'a, K, V> {
     /// The caller must ensure that the `raw_bucket` is valid in the given `map`,
