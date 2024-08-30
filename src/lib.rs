@@ -123,6 +123,9 @@ mod util;
 pub mod map;
 pub mod set;
 
+#[allow(unsafe_code)]
+mod raw;
+
 // Placed after `map` and `set` so new `rayon` methods on the types
 // are documented after the "normal" methods.
 #[cfg(feature = "rayon")]
@@ -233,22 +236,21 @@ enum TryReserveErrorKind {
 
 // These are not `From` so we don't expose them in our public API.
 impl TryReserveError {
-    fn from_alloc(error: alloc::collections::TryReserveError) -> Self {
+    fn from_std(error: alloc::collections::TryReserveError) -> Self {
         Self {
             kind: TryReserveErrorKind::Std(error),
         }
     }
 
-    fn from_hashbrown(error: hashbrown::TryReserveError) -> Self {
+    fn from_alloc(layout: alloc::alloc::Layout) -> Self {
         Self {
-            kind: match error {
-                hashbrown::TryReserveError::CapacityOverflow => {
-                    TryReserveErrorKind::CapacityOverflow
-                }
-                hashbrown::TryReserveError::AllocError { layout } => {
-                    TryReserveErrorKind::AllocError { layout }
-                }
-            },
+            kind: TryReserveErrorKind::AllocError { layout },
+        }
+    }
+
+    fn capacity_overflow() -> Self {
+        Self {
+            kind: TryReserveErrorKind::CapacityOverflow,
         }
     }
 }

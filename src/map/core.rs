@@ -12,8 +12,7 @@ mod raw;
 
 pub mod raw_entry_v1;
 
-use hashbrown::raw::RawTable;
-
+use crate::raw::RawTable;
 use crate::vec::{self, Vec};
 use crate::TryReserveError;
 use core::mem;
@@ -249,8 +248,7 @@ impl<K, V> IndexMapCore<K, V> {
     /// Try to reserve capacity for `additional` more key-value pairs.
     pub(crate) fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
         self.indices
-            .try_reserve(additional, get_hash(&self.entries))
-            .map_err(TryReserveError::from_hashbrown)?;
+            .try_reserve(additional, get_hash(&self.entries))?;
         // Only grow entries if necessary, since we also round up capacity.
         if additional > self.entries.capacity() - self.entries.len() {
             self.try_reserve_entries(additional)
@@ -270,17 +268,16 @@ impl<K, V> IndexMapCore<K, V> {
         }
         self.entries
             .try_reserve_exact(additional)
-            .map_err(TryReserveError::from_alloc)
+            .map_err(TryReserveError::from_std)
     }
 
     /// Try to reserve capacity for `additional` more key-value pairs, without over-allocating.
     pub(crate) fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
         self.indices
-            .try_reserve(additional, get_hash(&self.entries))
-            .map_err(TryReserveError::from_hashbrown)?;
+            .try_reserve(additional, get_hash(&self.entries))?;
         self.entries
             .try_reserve_exact(additional)
-            .map_err(TryReserveError::from_alloc)
+            .map_err(TryReserveError::from_std)
     }
 
     /// Shrink the capacity of the map with a lower bound

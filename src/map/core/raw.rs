@@ -1,11 +1,11 @@
 #![allow(unsafe_code)]
-//! This module encapsulates the `unsafe` access to `hashbrown::raw::RawTable`,
+//! This module encapsulates the `unsafe` access to `raw::RawTable`,
 //! mostly in dealing with its bucket "pointers".
 
 use super::{equivalent, get_hash, Bucket, HashValue, IndexMapCore};
-use hashbrown::raw::RawTable;
+use crate::raw::RawTable;
 
-type RawBucket = hashbrown::raw::Bucket<usize>;
+type RawBucket = crate::raw::Bucket<usize>;
 
 /// Inserts many entries into a raw table without reallocating.
 ///
@@ -52,7 +52,7 @@ impl<K, V> IndexMapCore<K, V> {
     /// Search for a key in the table and return `Ok(entry_index)` if found.
     /// Otherwise, insert the key and return `Err(new_index)`.
     ///
-    /// Note that hashbrown may resize the table to reserve space for insertion,
+    /// Note that the `RawTable` may resize to reserve space for insertion,
     /// even before checking if it's already present, so this is somewhat biased
     /// towards new items.
     pub(crate) fn find_or_insert(&mut self, hash: HashValue, key: &K) -> Result<usize, usize>
