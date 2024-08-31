@@ -19,7 +19,7 @@ use super::imp::{
 /// is set per element. This is done by applying `BITMASK_ITER_MASK` on the
 /// mask bits.
 #[derive(Copy, Clone)]
-pub(crate) struct BitMask(pub(crate) BitMaskWord);
+pub(super) struct BitMask(pub(super) BitMaskWord);
 
 #[allow(clippy::use_self)]
 impl BitMask {
@@ -27,7 +27,7 @@ impl BitMask {
     #[inline]
     #[must_use]
     #[allow(dead_code)]
-    pub(crate) fn invert(self) -> Self {
+    pub(super) fn invert(self) -> Self {
         BitMask(self.0 ^ BITMASK_MASK)
     }
 
@@ -40,13 +40,13 @@ impl BitMask {
 
     /// Returns whether the `BitMask` has at least one set bit.
     #[inline]
-    pub(crate) fn any_bit_set(self) -> bool {
+    pub(super) fn any_bit_set(self) -> bool {
         self.0 != 0
     }
 
     /// Returns the first set bit in the `BitMask`, if there is one.
     #[inline]
-    pub(crate) fn lowest_set_bit(self) -> Option<usize> {
+    pub(super) fn lowest_set_bit(self) -> Option<usize> {
         if let Some(nonzero) = NonZeroBitMaskWord::new(self.0) {
             Some(Self::nonzero_trailing_zeros(nonzero))
         } else {
@@ -56,7 +56,7 @@ impl BitMask {
 
     /// Returns the number of trailing zeroes in the `BitMask`.
     #[inline]
-    pub(crate) fn trailing_zeros(self) -> usize {
+    pub(super) fn trailing_zeros(self) -> usize {
         // ARM doesn't have a trailing_zeroes instruction, and instead uses
         // reverse_bits (RBIT) + leading_zeroes (CLZ). However older ARM
         // versions (pre-ARMv7) don't have RBIT and need to emulate it
@@ -83,7 +83,7 @@ impl BitMask {
 
     /// Returns the number of leading zeroes in the `BitMask`.
     #[inline]
-    pub(crate) fn leading_zeros(self) -> usize {
+    pub(super) fn leading_zeros(self) -> usize {
         self.0.leading_zeros() as usize / BITMASK_STRIDE
     }
 }
@@ -103,7 +103,7 @@ impl IntoIterator for BitMask {
 /// Iterator over the contents of a `BitMask`, returning the indices of set
 /// bits.
 #[derive(Copy, Clone)]
-pub(crate) struct BitMaskIter(pub(crate) BitMask);
+pub(super) struct BitMaskIter(pub(super) BitMask);
 
 impl Iterator for BitMaskIter {
     type Item = usize;

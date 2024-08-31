@@ -417,7 +417,7 @@ impl Bucket {
     /// [`Hash`]: https://doc.rust-lang.org/core/hash/trait.Hash.html
     /// [`Eq`]: https://doc.rust-lang.org/core/cmp/trait.Eq.html
     #[inline]
-    pub(crate) fn as_ptr(&self) -> *mut usize {
+    fn as_ptr(&self) -> *mut usize {
         unsafe { self.ptr.as_ptr().sub(1) }
     }
 
@@ -477,7 +477,7 @@ impl Bucket {
     /// [`RawTable`]: crate::raw::RawTable
     /// [`RawTable::remove`]: crate::raw::RawTable::remove
     #[inline]
-    pub(crate) unsafe fn read(&self) -> usize {
+    unsafe fn read(&self) -> usize {
         self.as_ptr().read()
     }
 
@@ -499,7 +499,7 @@ impl Bucket {
     /// [`Hash`]: https://doc.rust-lang.org/core/hash/trait.Hash.html
     /// [`Eq`]: https://doc.rust-lang.org/core/cmp/trait.Eq.html
     #[inline]
-    pub(crate) unsafe fn write(&self, val: usize) {
+    unsafe fn write(&self, val: usize) {
         self.as_ptr().write(val);
     }
 
@@ -606,7 +606,7 @@ impl RawTable {
     ///
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    pub(crate) fn data_end(&self) -> NonNull<usize> {
+    fn data_end(&self) -> NonNull<usize> {
         //                        `self.table.ctrl.cast()` returns pointer that
         //                        points here (to the end of `T0`)
         //                          ∨
@@ -629,13 +629,13 @@ impl RawTable {
 
     /// Returns pointer to start of data table.
     #[inline]
-    pub(crate) unsafe fn data_start(&self) -> NonNull<usize> {
+    unsafe fn data_start(&self) -> NonNull<usize> {
         NonNull::new_unchecked(self.data_end().as_ptr().wrapping_sub(self.buckets()))
     }
 
     /// Returns the index of a bucket from a `Bucket`.
     #[inline]
-    pub(crate) unsafe fn bucket_index(&self, bucket: &Bucket) -> usize {
+    unsafe fn bucket_index(&self, bucket: &Bucket) -> usize {
         bucket.to_base_index(self.data_end())
     }
 
@@ -659,7 +659,7 @@ impl RawTable {
     /// [`RawTable::buckets`]: RawTable::buckets
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    pub(crate) unsafe fn bucket(&self, index: usize) -> Bucket {
+    unsafe fn bucket(&self, index: usize) -> Bucket {
         // Return a pointer to the `element` in the `data part` of the table
         // (we start counting from "0", so that in the expression T[n], the "n" index actually one less than
         // the "buckets" number of our `RawTable`, i.e. "n = RawTable::buckets() - 1"):
@@ -749,7 +749,7 @@ impl RawTable {
 
     /// Marks all table buckets as empty without dropping their contents.
     #[inline]
-    pub(crate) fn clear_no_drop(&mut self) {
+    fn clear_no_drop(&mut self) {
         self.table.clear_no_drop();
     }
 
@@ -1165,7 +1165,7 @@ impl RawTable {
 
     /// Returns `true` if the table contains no elements.
     #[inline]
-    pub(crate) fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
@@ -2916,7 +2916,7 @@ impl Drop for RawTable {
 
 /// Iterator over a sub-range of a table. Unlike `RawIter` this iterator does
 /// not track an item count.
-pub(crate) struct RawIterRange {
+struct RawIterRange {
     // Mask of full buckets in the current group. Bits are cleared from this
     // mask as each element is processed.
     current_group: BitMaskIter,
@@ -3129,7 +3129,7 @@ impl FusedIterator for RawIterRange {}
 /// - The order in which the iterator yields bucket is unspecified and may
 ///   change in the future.
 pub(crate) struct RawIter {
-    pub(crate) iter: RawIterRange,
+    iter: RawIterRange,
     items: usize,
 }
 
@@ -3185,7 +3185,7 @@ impl FusedIterator for RawIter {}
 ///   created will be yielded by that iterator.
 /// - The order in which the iterator yields indices of the buckets is unspecified
 ///   and may change in the future.
-pub(crate) struct FullBucketsIndices {
+struct FullBucketsIndices {
     // Mask of full buckets in the current group. Bits are cleared from this
     // mask as each element is processed.
     current_group: BitMaskIter,
