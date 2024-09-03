@@ -2138,42 +2138,6 @@ impl RawTable {
         self.bucket_mask == 0
     }
 
-    /// Attempts to allocate a new hash table with at least enough capacity
-    /// for inserting the given number of elements without reallocating,
-    /// and return it inside ScopeGuard to protect against panic in the hash
-    /// function.
-    ///
-    /// # Note
-    ///
-    /// It is recommended (but not required):
-    ///
-    /// * That the new table's `capacity` be greater than or equal to `self.items`.
-    ///
-    /// * The `alloc` is the same [`Allocator`] as the `Allocator` used
-    ///   to allocate this table.
-    ///
-    /// * The `table_layout` is the same [`TableLayout`] as the `TableLayout` used
-    ///   to allocate this table.
-    ///
-    /// If `table_layout` does not match the `TableLayout` that was used to allocate
-    /// this table, then using `mem::swap` with the `self` and the new table returned
-    /// by this function results in [`undefined behavior`].
-    ///
-    /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
-    #[allow(clippy::mut_mut)]
-    #[inline]
-    fn prepare_resize(
-        &self,
-        table_layout: TableLayout,
-        capacity: usize,
-        fallibility: Fallibility,
-    ) -> Result<Self, TryReserveError> {
-        debug_assert!(self.items <= capacity);
-
-        // Allocate and initialize the new table.
-        RawTable::fallible_with_capacity(table_layout, capacity, fallibility)
-    }
-
     /// Reserves or rehashes to make room for `additional` more elements.
     ///
     /// This uses dynamic dispatch to reduce the amount of
@@ -2334,9 +2298,10 @@ impl RawTable {
         fallibility: Fallibility,
         layout: TableLayout,
     ) -> Result<(), TryReserveError> {
-        // SAFETY: We know for sure that `alloc` and `layout` matches the [`Allocator`] and [`TableLayout`]
-        // that were used to allocate this table.
-        let mut new_table = self.prepare_resize(layout, capacity, fallibility)?;
+        debug_assert!(self.items <= capacity);
+
+        // Allocate and initialize the new table.
+        let mut new_table = RawTable::fallible_with_capacity(layout, capacity, fallibility)?;
 
         // SAFETY: We know for sure that RawTable will outlive the
         // returned `FullBucketsIndices` iterator, and the caller of this
