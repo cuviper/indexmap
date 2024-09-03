@@ -958,26 +958,14 @@ unsafe impl Send for RawTable {}
 unsafe impl Sync for RawTable {}
 
 impl RawTable {
-    const NEW: Self = Self::new_inner();
+    const NEW: Self = Self {
+        // Be careful to cast the entire slice to a raw pointer.
+        ctrl: unsafe { NonNull::new_unchecked(Group::static_empty() as *const _ as *mut u8) },
+        bucket_mask: 0,
+        items: 0,
+        growth_left: 0,
+    };
 
-    /// Creates a new empty hash table without allocating any memory.
-    ///
-    /// In effect this returns a table with exactly 1 bucket. However we can
-    /// leave the data pointer dangling since that bucket is never accessed
-    /// due to our load factor forcing us to always have at least 1 free bucket.
-    #[inline]
-    const fn new_inner() -> Self {
-        Self {
-            // Be careful to cast the entire slice to a raw pointer.
-            ctrl: unsafe { NonNull::new_unchecked(Group::static_empty() as *const _ as *mut u8) },
-            bucket_mask: 0,
-            items: 0,
-            growth_left: 0,
-        }
-    }
-}
-
-impl RawTable {
     /// Allocates a new [`RawTable`] with the given number of buckets.
     /// The control bytes and buckets are left uninitialized.
     ///
