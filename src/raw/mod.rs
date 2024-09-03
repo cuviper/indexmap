@@ -207,51 +207,6 @@ fn bucket_mask_to_capacity(bucket_mask: usize) -> usize {
     }
 }
 
-/// Helper which allows the max calculation for ctrl_align to be statically computed for each T
-/// while keeping the rest of `calculate_layout_for` independent of `T`
-#[derive(Copy, Clone)]
-struct TableLayout {
-    size: usize,
-    ctrl_align: usize,
-}
-
-impl TableLayout {
-    #[inline]
-    const fn new() -> Self {
-        let layout = Layout::new::<usize>();
-        Self {
-            size: layout.size(),
-            ctrl_align: if layout.align() > Group::WIDTH {
-                layout.align()
-            } else {
-                Group::WIDTH
-            },
-        }
-    }
-
-    #[inline]
-    fn calculate_layout_for(self, buckets: usize) -> Option<(Layout, usize)> {
-        debug_assert!(buckets.is_power_of_two());
-
-        let TableLayout { size, ctrl_align } = self;
-        // Manual layout calculation since Layout methods are not yet stable.
-        let ctrl_offset =
-            size.checked_mul(buckets)?.checked_add(ctrl_align - 1)? & !(ctrl_align - 1);
-        let len = ctrl_offset.checked_add(buckets + Group::WIDTH)?;
-
-        // We need an additional check to ensure that the allocation doesn't
-        // exceed `isize::MAX` (https://github.com/rust-lang/rust/pull/95295).
-        if len > isize::MAX as usize - (ctrl_align - 1) {
-            return None;
-        }
-
-        Some((
-            unsafe { Layout::from_size_align_unchecked(len, ctrl_align) },
-            ctrl_offset,
-        ))
-    }
-}
-
 /// A reference to an empty bucket into which an can be inserted.
 pub(crate) struct InsertSlot {
     index: usize,
@@ -553,7 +508,35 @@ pub(crate) struct RawTable {
 }
 
 impl RawTable {
-    const TABLE_LAYOUT: TableLayout = TableLayout::new();
+    const USIZE_BYTES: usize = mem::size_of::<usize>();
+    const CTRL_ALIGN: usize = if mem::align_of::<usize>() > Group::WIDTH {
+        mem::align_of::<usize>()
+    } else {
+        Group::WIDTH
+    };
+
+    #[inline]
+    fn calculate_layout_for(buckets: usize) -> Option<(Layout, usize)> {
+        debug_assert!(buckets.is_power_of_two());
+
+        // Manual layout calculation since Layout methods are not yet stable.
+        let ctrl_offset = Self::USIZE_BYTES
+            .checked_mul(buckets)?
+            .checked_add(Self::CTRL_ALIGN - 1)?
+            & !(Self::CTRL_ALIGN - 1);
+        let len = ctrl_offset.checked_add(buckets + Group::WIDTH)?;
+
+        // We need an additional check to ensure that the allocation doesn't
+        // exceed `isize::MAX` (https://github.com/rust-lang/rust/pull/95295).
+        if len > isize::MAX as usize - (Self::CTRL_ALIGN - 1) {
+            return None;
+        }
+
+        Some((
+            unsafe { Layout::from_size_align_unchecked(len, Self::CTRL_ALIGN) },
+            ctrl_offset,
+        ))
+    }
 
     /// Creates a new empty hash table without allocating any memory.
     ///
@@ -848,10 +831,7 @@ impl RawTable {
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         unsafe {
-            // SAFETY:
-            // 1. We know for sure that `alloc` and `layout` matches the [`Allocator`] and
-            //    [`TableLayout`] that were used to allocate this table.
-            // 2. The caller ensures that the control bytes of the `RawTable`
+            // SAFETY: The caller ensures that the control bytes of the `RawTable`
             //    are already initialized.
             self.reserve_rehash_inner(
                 additional,
@@ -896,9 +876,7 @@ impl RawTable {
     ) -> Result<(), TryReserveError> {
         // SAFETY:
         // 1. The caller of this function guarantees that `capacity >= self.items`.
-        // 2. We know for sure that `alloc` and `layout` matches the [`Allocator`] and
-        //    [`TableLayout`] that were used to allocate this table.
-        // 3. The caller ensures that the control bytes of the `RawTable`
+        // 2. The caller ensures that the control bytes of the `RawTable`
         //    are already initialized.
         self.resize_inner(
             capacity,
@@ -1195,7 +1173,7 @@ impl RawTable {
         debug_assert!(buckets.is_power_of_two());
 
         // Avoid `Option::ok_or_else` because it bloats LLVM IR.
-        let (layout, ctrl_offset) = match Self::TABLE_LAYOUT.calculate_layout_for(buckets) {
+        let (layout, ctrl_offset) = match Self::calculate_layout_for(buckets) {
             Some(lco) => lco,
             None => return Err(fallibility.capacity_overflow()),
         };
@@ -1235,7 +1213,7 @@ impl RawTable {
 
                 let result = Self::new_uninitialized_inner(buckets, fallibility)?;
                 // SAFETY: We checked that the table is allocated and therefore the table already has
-                // `self.bucket_mask + 1 + Group::WIDTH` number of control bytes (see TableLayout::calculate_layout_for)
+                // `self.bucket_mask + 1 + Group::WIDTH` number of control bytes (see Self::calculate_layout_for)
                 // so writing `self.num_ctrl_bytes() == bucket_mask + 1 + Group::WIDTH` bytes is safe.
                 result.ctrl(0).write_bytes(EMPTY, result.num_ctrl_bytes());
 
@@ -1319,7 +1297,7 @@ impl RawTable {
             //   initialized and `ptr = self.ctrl(0)` points to the start of the array of control
             //   bytes, therefore: `ctrl` is valid for reads, properly aligned to `Group::WIDTH`
             //   and points to the properly initialized control bytes (see also
-            //   `TableLayout::calculate_layout_for` and `ptr::read`);
+            //   `Self::calculate_layout_for` and `ptr::read`);
             //
             // * Because the caller of this function ensures that the index was provided by the
             //   `self.find_insert_slot_in_group()` function, so for for tables larger than the
@@ -1692,7 +1670,7 @@ impl RawTable {
         //    due to the extended control bytes range, which is `self.bucket_mask + 1 + Group::WIDTH`;
         // 3. The caller of this function guarantees that [`RawTable`] has already been allocated;
         // 4. We can use `Group::load_aligned` and `Group::store_aligned` here since we start from 0
-        //    and go to the end with a step equal to `Group::WIDTH` (see TableLayout::calculate_layout_for).
+        //    and go to the end with a step equal to `Group::WIDTH` (see Self::calculate_layout_for).
         for i in (0..self.buckets_inner()).step_by(Group::WIDTH) {
             let group = Group::load_aligned(self.ctrl(i));
             let group = group.convert_special_to_empty_and_full_to_deleted();
@@ -1874,11 +1852,11 @@ impl RawTable {
     /// [`RawTable::buckets`]: RawTable::buckets
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    unsafe fn bucket_ptr(&self, index: usize, size_of: usize) -> *mut u8 {
+    unsafe fn bucket_ptr(&self, index: usize) -> *mut u8 {
         debug_assert_ne!(self.bucket_mask, 0);
         debug_assert!(index < self.buckets_inner());
         let base: *mut u8 = self.data_end_inner().as_ptr().cast();
-        base.sub((index + 1) * size_of)
+        base.sub((index + 1) * Self::USIZE_BYTES)
     }
 
     /// Returns pointer to one past last `data` element in the table as viewed from
@@ -2143,9 +2121,6 @@ impl RawTable {
     /// * The `alloc` must be the same [`Allocator`] as the `Allocator` used
     ///   to allocate this table.
     ///
-    /// * The `layout` must be the same [`TableLayout`] as the `TableLayout`
-    ///   used to allocate this table.
-    ///
     /// * The [`RawTable`] must have properly initialized control bytes.
     ///
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
@@ -2170,11 +2145,9 @@ impl RawTable {
             // SAFETY:
             // 1. We know for sure that `[`RawTable`]` has already been allocated
             //    (since new_items <= full_capacity / 2);
-            // 2. The caller ensures that `layout` matches the [`TableLayout`] that was
-            //    used to allocate this table.
-            // 3. The caller ensures that the control bytes of the `RawTable`
+            // 2. The caller ensures that the control bytes of the `RawTable`
             //    are already initialized.
-            self.rehash_in_place(hasher, Self::TABLE_LAYOUT.size);
+            self.rehash_in_place(hasher);
             Ok(())
         } else {
             // Otherwise, conservatively resize to at least the next size up
@@ -2182,9 +2155,7 @@ impl RawTable {
             //
             // SAFETY:
             // 1. We know for sure that `capacity >= self.items`.
-            // 2. The caller ensures that `alloc` and `layout` matches the [`Allocator`] and
-            //    [`TableLayout`] that were used to allocate this table.
-            // 3. The caller ensures that the control bytes of the `RawTable`
+            // 2. The caller ensures that the control bytes of the `RawTable`
             //    are already initialized.
             self.resize_inner(
                 usize::max(new_items, full_capacity + 1),
@@ -2252,9 +2223,6 @@ impl RawTable {
     ///
     /// * The `alloc` must be the same [`Allocator`] as the `Allocator` used
     ///   to allocate this table;
-    ///
-    /// * The `layout` must be the same [`TableLayout`] as the `TableLayout`
-    ///   used to allocate this table;
     ///
     /// * The [`RawTable`] must have properly initialized control bytes.
     ///
@@ -2327,9 +2295,9 @@ impl RawTable {
             //
             // * Both `src` and `dst` point to different region of memory.
             ptr::copy_nonoverlapping(
-                self.bucket_ptr(full_byte_index, Self::TABLE_LAYOUT.size),
-                new_table.bucket_ptr(new_index, Self::TABLE_LAYOUT.size),
-                Self::TABLE_LAYOUT.size,
+                self.bucket_ptr(full_byte_index),
+                new_table.bucket_ptr(new_index),
+                Self::USIZE_BYTES,
             );
         }
 
@@ -2359,8 +2327,6 @@ impl RawTable {
     ///
     /// If any of the following conditions are violated, the result is [`undefined behavior`]:
     ///
-    /// * The `size_of` must be equal to the size of the elements stored in the table;
-    ///
     /// * The [`RawTable`] has already been allocated;
     ///
     /// * The [`RawTable`] must have properly initialized control bytes.
@@ -2368,7 +2334,7 @@ impl RawTable {
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    unsafe fn rehash_in_place(&mut self, hasher: &dyn Fn(&mut Self, usize) -> u64, size_of: usize) {
+    unsafe fn rehash_in_place(&mut self, hasher: &dyn Fn(&mut Self, usize) -> u64) {
         // If the hash function panics then properly clean up any elements
         // that we haven't rehashed yet. We unfortunately can't preserve the
         // element since we lost their hash and have no way of recovering it
@@ -2387,7 +2353,7 @@ impl RawTable {
                 continue;
             }
 
-            let i_p = guard.bucket_ptr(i, size_of);
+            let i_p = guard.bucket_ptr(i);
 
             'inner: loop {
                 // Hash the current item
@@ -2409,7 +2375,7 @@ impl RawTable {
                     continue 'outer;
                 }
 
-                let new_i_p = guard.bucket_ptr(new_i, size_of);
+                let new_i_p = guard.bucket_ptr(new_i);
 
                 // We are moving the current item to a new position. Write
                 // our H2 to the control byte of the new position.
@@ -2419,14 +2385,14 @@ impl RawTable {
                     // If the target slot is empty, simply move the current
                     // element into the new slot and clear the old control
                     // byte.
-                    ptr::copy_nonoverlapping(i_p, new_i_p, size_of);
+                    ptr::copy_nonoverlapping(i_p, new_i_p, Self::USIZE_BYTES);
                     continue 'outer;
                 } else {
                     // If the target slot is occupied, swap the two elements
                     // and then continue processing the element that we just
                     // swapped into the old slot.
                     debug_assert_eq!(prev_ctrl, DELETED);
-                    ptr::swap_nonoverlapping(i_p, new_i_p, size_of);
+                    ptr::swap_nonoverlapping(i_p, new_i_p, Self::USIZE_BYTES);
                     continue 'inner;
                 }
             }
@@ -2447,10 +2413,6 @@ impl RawTable {
     /// * The [`RawTable`] has already been allocated, otherwise
     ///   calling this function results in [`undefined behavior`]
     ///
-    /// * The `table_layout` must be the same [`TableLayout`] as the `TableLayout`
-    ///   that was used to allocate this table. Failure to comply with this condition
-    ///   may result in [`undefined behavior`].
-    ///
     /// See also [`GlobalAlloc::dealloc`] or [`Allocator::deallocate`] for more  information.
     ///
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
@@ -2464,7 +2426,7 @@ impl RawTable {
         );
 
         // Avoid `Option::unwrap_or_else` because it bloats LLVM IR.
-        let (layout, ctrl_offset) = match Self::TABLE_LAYOUT.calculate_layout_for(self.buckets_inner()) {
+        let (layout, ctrl_offset) = match Self::calculate_layout_for(self.buckets_inner()) {
             Some(lco) => lco,
             None => unsafe { hint::unreachable_unchecked() },
         };
@@ -3105,10 +3067,7 @@ mod test_map {
 
     fn rehash_in_place(table: &mut RawTable, hasher: impl Fn(&usize) -> u64) {
         unsafe {
-            table.rehash_in_place(
-                &|table, index| hasher(table.bucket_inner(index).as_ref()),
-                mem::size_of::<usize>(),
-            );
+            table.rehash_in_place(&|table, index| hasher(table.bucket_inner(index).as_ref()));
         }
     }
 
@@ -3161,7 +3120,7 @@ mod test_map {
             // WE SIMULATE, AS IT WERE, A FULL TABLE.
 
             // SAFETY: We checked that the table is allocated and therefore the table already has
-            // `self.bucket_mask + 1 + Group::WIDTH` number of control bytes (see TableLayout::calculate_layout_for)
+            // `self.bucket_mask + 1 + Group::WIDTH` number of control bytes (see Self::calculate_layout_for)
             // so writing `table.num_ctrl_bytes() == bucket_mask + 1 + Group::WIDTH` bytes is safe.
             table.ctrl(0).write_bytes(EMPTY, table.num_ctrl_bytes());
 
