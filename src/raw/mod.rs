@@ -568,7 +568,7 @@ impl RawTable {
     /// Allocates a new hash table with at least enough capacity for inserting
     /// the given number of elements without reallocating.
     pub(crate) fn with_capacity(capacity: usize) -> Self {
-        Self::with_capacity_inner(Self::TABLE_LAYOUT, capacity)
+        Self::with_capacity_inner(capacity)
     }
 
     /// Allocates a new hash table with the given number of buckets.
@@ -581,11 +581,7 @@ impl RawTable {
     ) -> Result<Self, TryReserveError> {
         debug_assert!(buckets.is_power_of_two());
 
-        Ok(Self::new_uninitialized_inner(
-            Self::TABLE_LAYOUT,
-            buckets,
-            fallibility,
-        )?)
+        Self::new_uninitialized_inner(buckets, fallibility)
     }
 
     /// Returns pointer to one past last `data` element in the table as viewed from
@@ -777,7 +773,7 @@ impl RawTable {
         if min_buckets < self.buckets() {
             // Fast path if the table is empty
             if self.items == 0 {
-                *self = Self::with_capacity_inner(Self::TABLE_LAYOUT, min_size);
+                *self = Self::with_capacity_inner(min_size);
             } else {
                 // Avoid `Result::unwrap_or_else` because it bloats LLVM IR.
                 unsafe {
@@ -861,7 +857,6 @@ impl RawTable {
                 additional,
                 &|table, index| hasher(table.bucket_inner(index).as_ref()),
                 fallibility,
-                Self::TABLE_LAYOUT,
             )
         }
     }
@@ -909,7 +904,6 @@ impl RawTable {
             capacity,
             &|table, index| hasher(table.bucket_inner(index).as_ref()),
             fallibility,
-            Self::TABLE_LAYOUT,
         )
     }
 
@@ -1195,14 +1189,13 @@ impl RawTable {
     /// [`Allocator`]: https://doc.rust-lang.org/alloc/alloc/trait.Allocator.html
     #[inline]
     unsafe fn new_uninitialized_inner(
-        table_layout: TableLayout,
         buckets: usize,
         fallibility: Fallibility,
     ) -> Result<Self, TryReserveError> {
         debug_assert!(buckets.is_power_of_two());
 
         // Avoid `Option::ok_or_else` because it bloats LLVM IR.
-        let (layout, ctrl_offset) = match table_layout.calculate_layout_for(buckets) {
+        let (layout, ctrl_offset) = match Self::TABLE_LAYOUT.calculate_layout_for(buckets) {
             Some(lco) => lco,
             None => return Err(fallibility.capacity_overflow()),
         };
@@ -1228,7 +1221,6 @@ impl RawTable {
     /// All the control bytes are initialized with the [`EMPTY`] bytes.
     #[inline]
     fn fallible_with_capacity(
-        table_layout: TableLayout,
         capacity: usize,
         fallibility: Fallibility,
     ) -> Result<Self, TryReserveError> {
@@ -1241,7 +1233,7 @@ impl RawTable {
                 let buckets =
                     capacity_to_buckets(capacity).ok_or_else(|| fallibility.capacity_overflow())?;
 
-                let result = Self::new_uninitialized_inner(table_layout, buckets, fallibility)?;
+                let result = Self::new_uninitialized_inner(buckets, fallibility)?;
                 // SAFETY: We checked that the table is allocated and therefore the table already has
                 // `self.bucket_mask + 1 + Group::WIDTH` number of control bytes (see TableLayout::calculate_layout_for)
                 // so writing `self.num_ctrl_bytes() == bucket_mask + 1 + Group::WIDTH` bytes is safe.
@@ -1263,9 +1255,9 @@ impl RawTable {
     ///
     /// [`fallible_with_capacity`]: RawTable::fallible_with_capacity
     /// [`abort`]: https://doc.rust-lang.org/alloc/alloc/fn.handle_alloc_error.html
-    fn with_capacity_inner(table_layout: TableLayout, capacity: usize) -> Self {
+    fn with_capacity_inner(capacity: usize) -> Self {
         // Avoid `Result::unwrap_or_else` because it bloats LLVM IR.
-        match Self::fallible_with_capacity(table_layout, capacity, Fallibility::Infallible) {
+        match Self::fallible_with_capacity(capacity, Fallibility::Infallible) {
             Ok(table_inner) => table_inner,
             // SAFETY: All allocation errors will be caught inside `RawTable::new_uninitialized`.
             Err(_) => unsafe { hint::unreachable_unchecked() },
@@ -2164,7 +2156,6 @@ impl RawTable {
         additional: usize,
         hasher: &dyn Fn(&mut Self, usize) -> u64,
         fallibility: Fallibility,
-        layout: TableLayout,
     ) -> Result<(), TryReserveError> {
         // Avoid `Option::ok_or_else` because it bloats LLVM IR.
         let new_items = match self.items.checked_add(additional) {
@@ -2183,7 +2174,7 @@ impl RawTable {
             //    used to allocate this table.
             // 3. The caller ensures that the control bytes of the `RawTable`
             //    are already initialized.
-            self.rehash_in_place(hasher, layout.size);
+            self.rehash_in_place(hasher, Self::TABLE_LAYOUT.size);
             Ok(())
         } else {
             // Otherwise, conservatively resize to at least the next size up
@@ -2199,7 +2190,6 @@ impl RawTable {
                 usize::max(new_items, full_capacity + 1),
                 hasher,
                 fallibility,
-                layout,
             )
         }
     }
@@ -2296,12 +2286,11 @@ impl RawTable {
         capacity: usize,
         hasher: &dyn Fn(&mut Self, usize) -> u64,
         fallibility: Fallibility,
-        layout: TableLayout,
     ) -> Result<(), TryReserveError> {
         debug_assert!(self.items <= capacity);
 
         // Allocate and initialize the new table.
-        let mut new_table = RawTable::fallible_with_capacity(layout, capacity, fallibility)?;
+        let mut new_table = RawTable::fallible_with_capacity(capacity, fallibility)?;
 
         // SAFETY: We know for sure that RawTable will outlive the
         // returned `FullBucketsIndices` iterator, and the caller of this
@@ -2338,9 +2327,9 @@ impl RawTable {
             //
             // * Both `src` and `dst` point to different region of memory.
             ptr::copy_nonoverlapping(
-                self.bucket_ptr(full_byte_index, layout.size),
-                new_table.bucket_ptr(new_index, layout.size),
-                layout.size,
+                self.bucket_ptr(full_byte_index, Self::TABLE_LAYOUT.size),
+                new_table.bucket_ptr(new_index, Self::TABLE_LAYOUT.size),
+                Self::TABLE_LAYOUT.size,
             );
         }
 
@@ -2468,14 +2457,14 @@ impl RawTable {
     /// [`GlobalAlloc::dealloc`]: https://doc.rust-lang.org/alloc/alloc/trait.GlobalAlloc.html#tymethod.dealloc
     /// [`Allocator::deallocate`]: https://doc.rust-lang.org/alloc/alloc/trait.Allocator.html#tymethod.deallocate
     #[inline]
-    unsafe fn allocation_info(&self, table_layout: TableLayout) -> (NonNull<u8>, Layout) {
+    unsafe fn allocation_info(&self) -> (NonNull<u8>, Layout) {
         debug_assert!(
             !self.is_empty_singleton(),
             "this function can only be called on non-empty tables"
         );
 
         // Avoid `Option::unwrap_or_else` because it bloats LLVM IR.
-        let (layout, ctrl_offset) = match table_layout.calculate_layout_for(self.buckets_inner()) {
+        let (layout, ctrl_offset) = match Self::TABLE_LAYOUT.calculate_layout_for(self.buckets_inner()) {
             Some(lco) => lco,
             None => unsafe { hint::unreachable_unchecked() },
         };
@@ -2637,7 +2626,6 @@ impl Clone for RawTable {
                 // If necessary, resize our table to match the source.
                 if self_.buckets() != source.buckets() {
                     let new_inner = match Self::new_uninitialized_inner(
-                        Self::TABLE_LAYOUT,
                         source.buckets(),
                         Fallibility::Infallible,
                     ) {
@@ -2726,7 +2714,7 @@ impl Drop for RawTable {
         if !self.is_empty_singleton() {
             unsafe {
                 // SAFETY: We have checked that our table is allocated.
-                let (ptr, layout) = self.allocation_info(Self::TABLE_LAYOUT);
+                let (ptr, layout) = self.allocation_info();
                 dealloc(ptr.as_ptr(), layout);
             }
         }
