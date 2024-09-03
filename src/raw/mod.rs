@@ -634,12 +634,6 @@ impl RawTable {
         }
     }
 
-    /// Marks all table buckets as empty without dropping their contents.
-    #[inline]
-    fn clear_no_drop(&mut self) {
-        self.clear_no_drop_inner();
-    }
-
     /// Removes all elements from the table without freeing the backing memory.
     #[inline]
     pub(crate) fn clear(&mut self) {
@@ -2350,7 +2344,7 @@ impl RawTable {
 
     /// Marks all table buckets as empty without dropping their contents.
     #[inline]
-    fn clear_no_drop_inner(&mut self) {
+    fn clear_no_drop(&mut self) {
         if !self.is_empty_singleton() {
             unsafe {
                 self.ctrl(0).write_bytes(EMPTY, self.num_ctrl_bytes());
