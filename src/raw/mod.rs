@@ -952,19 +952,6 @@ impl RawTable {
     pub(crate) fn buckets(&self) -> usize {
         self.bucket_mask + 1
     }
-
-    /// Returns an iterator over every element in the table. It is up to
-    /// the caller to ensure that the `RawTable` outlives the `RawIter`.
-    /// Because we cannot make the `next` method unsafe on the `RawIter`
-    /// struct, we have to make the `iter` method unsafe.
-    #[inline]
-    pub(crate) unsafe fn iter(&self) -> RawIter {
-        // SAFETY:
-        // 1. The caller must uphold the safety contract for `iter` method.
-        // 2. The [`RawTable`] must already have properly initialized control bytes since
-        //    we will never expose RawTable::new_uninitialized in a public API.
-        self.iter_inner()
-    }
 }
 
 unsafe impl Send for RawTable {}
@@ -1550,7 +1537,7 @@ impl RawTable {
     ///
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    unsafe fn iter_inner(&self) -> RawIter {
+    pub(crate) unsafe fn iter(&self) -> RawIter {
         // SAFETY:
         // 1. Since the caller of this function ensures that the control bytes
         //    are properly initialized and `self.data_end()` points to the start
