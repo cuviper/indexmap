@@ -1778,50 +1778,6 @@ impl RawTable {
         }
     }
 
-    /// Executes the destructors (if any) of the values stored in the table and than
-    /// deallocates the table.
-    ///
-    /// # Note
-    ///
-    /// Calling this function automatically makes invalid (dangling) all instances of
-    /// buckets ([`Bucket`]) and makes invalid (dangling) the `ctrl` field of the table.
-    ///
-    /// This function does not make any changes to the `bucket_mask`, `items` or `growth_left`
-    /// fields of the table. If necessary, the caller of this function must manually set
-    /// up these table fields.
-    ///
-    /// # Safety
-    ///
-    /// If any of the following conditions are violated, the result is [`undefined behavior`]:
-    ///
-    /// * Calling this function more than once;
-    ///
-    /// * The `alloc` must be the same [`Allocator`] as the `Allocator` that was used
-    ///   to allocate this table.
-    ///
-    /// * The `table_layout` must be the same [`TableLayout`] as the `TableLayout` that
-    ///   was used to allocate this table.
-    ///
-    /// Attempt to use the `ctrl` field of the table (dereference) after calling this
-    /// function results in [`undefined behavior`].
-    ///
-    /// It is safe to call this function on a table that has not been allocated,
-    /// on a table with uninitialized control bytes, and on a table with no actual
-    /// data but with `Full` control bytes if `self.items == 0`.
-    ///
-    /// [`RawTable::free_buckets`]: RawTable::free_buckets
-    /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
-    unsafe fn drop_inner_table(&mut self, table_layout: TableLayout) {
-        if !self.is_empty_singleton() {
-            unsafe {
-                // SAFETY:
-                // 1. We have checked that our table is allocated.
-                // 2. The caller must uphold the safety contract for `drop_inner_table` method.
-                self.free_buckets(table_layout);
-            }
-        }
-    }
-
     /// Returns a pointer to an element in the table (convenience for
     /// `Bucket::from_base_index(self.data_end(), index)`).
     ///
@@ -2527,39 +2483,6 @@ impl RawTable {
         mem::forget(guard);
     }
 
-    /// Deallocates the table without dropping any entries.
-    ///
-    /// # Note
-    ///
-    /// Calling this function automatically
-    /// makes invalid (dangling) all instances of buckets ([`Bucket`]) and makes invalid
-    /// (dangling) the `ctrl` field of the table.
-    ///
-    /// # Safety
-    ///
-    /// If any of the following conditions are violated, the result is [`Undefined Behavior`]:
-    ///
-    /// * The [`RawTable`] has already been allocated;
-    ///
-    /// * The `alloc` must be the same [`Allocator`] as the `Allocator` that was used
-    ///   to allocate this table.
-    ///
-    /// * The `table_layout` must be the same [`TableLayout`] as the `TableLayout` that was used
-    ///   to allocate this table.
-    ///
-    /// See also [`GlobalAlloc::dealloc`] or [`Allocator::deallocate`] for more  information.
-    ///
-    /// [`Undefined Behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
-    /// [`GlobalAlloc::dealloc`]: https://doc.rust-lang.org/alloc/alloc/trait.GlobalAlloc.html#tymethod.dealloc
-    /// [`Allocator::deallocate`]: https://doc.rust-lang.org/alloc/alloc/trait.Allocator.html#tymethod.deallocate
-    #[inline]
-    unsafe fn free_buckets(&mut self, table_layout: TableLayout) {
-        // SAFETY: The caller must uphold the safety contract for `free_buckets`
-        // method.
-        let (ptr, layout) = self.allocation_info(table_layout);
-        dealloc(ptr.as_ptr(), layout);
-    }
-
     /// Returns a pointer to the allocated memory and the layout that was used to
     /// allocate the table.
     ///
@@ -2835,12 +2758,12 @@ impl RawTable {
 impl Drop for RawTable {
     #[inline]
     fn drop(&mut self) {
-        unsafe {
-            // SAFETY:
-            // 1. We call the function only once;
-            // 2. We know for sure that `alloc` and `table_layout` matches the [`Allocator`]
-            //    and [`TableLayout`] that were used to allocate this table.
-            self.drop_inner_table(Self::TABLE_LAYOUT);
+        if !self.is_empty_singleton() {
+            unsafe {
+                // SAFETY: We have checked that our table is allocated.
+                let (ptr, layout) = self.allocation_info(Self::TABLE_LAYOUT);
+                dealloc(ptr.as_ptr(), layout);
+            }
         }
     }
 }
