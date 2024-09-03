@@ -1,5 +1,5 @@
 use crate::TryReserveError;
-use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout};
+use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout, LayoutError};
 use core::iter::FusedIterator;
 use core::mem;
 use core::mem::MaybeUninit;
@@ -509,33 +509,15 @@ pub(crate) struct RawTable {
 
 impl RawTable {
     const USIZE_BYTES: usize = mem::size_of::<usize>();
-    const CTRL_ALIGN: usize = if mem::align_of::<usize>() > Group::WIDTH {
-        mem::align_of::<usize>()
-    } else {
-        Group::WIDTH
-    };
 
     #[inline]
-    fn calculate_layout_for(buckets: usize) -> Option<(Layout, usize)> {
+    fn calculate_layout_for(buckets: usize) -> Result<(Layout, usize), LayoutError> {
         debug_assert!(buckets.is_power_of_two());
 
-        // Manual layout calculation since Layout methods are not yet stable.
-        let ctrl_offset = Self::USIZE_BYTES
-            .checked_mul(buckets)?
-            .checked_add(Self::CTRL_ALIGN - 1)?
-            & !(Self::CTRL_ALIGN - 1);
-        let len = ctrl_offset.checked_add(buckets + Group::WIDTH)?;
+        let data = Layout::array::<usize>(buckets)?;
+        let ctrl = Layout::array::<u8>(buckets + Group::WIDTH)?.align_to(Group::WIDTH)?;
 
-        // We need an additional check to ensure that the allocation doesn't
-        // exceed `isize::MAX` (https://github.com/rust-lang/rust/pull/95295).
-        if len > isize::MAX as usize - (Self::CTRL_ALIGN - 1) {
-            return None;
-        }
-
-        Some((
-            unsafe { Layout::from_size_align_unchecked(len, Self::CTRL_ALIGN) },
-            ctrl_offset,
-        ))
+        data.extend(ctrl)
     }
 
     /// Creates a new empty hash table without allocating any memory.
@@ -1174,8 +1156,8 @@ impl RawTable {
 
         // Avoid `Option::ok_or_else` because it bloats LLVM IR.
         let (layout, ctrl_offset) = match Self::calculate_layout_for(buckets) {
-            Some(lco) => lco,
-            None => return Err(fallibility.capacity_overflow()),
+            Ok(lco) => lco,
+            Err(_) => return Err(fallibility.capacity_overflow()),
         };
 
         let ptr: NonNull<u8> = match NonNull::new(alloc(layout)) {
@@ -2426,10 +2408,8 @@ impl RawTable {
         );
 
         // Avoid `Option::unwrap_or_else` because it bloats LLVM IR.
-        let (layout, ctrl_offset) = match Self::calculate_layout_for(self.buckets_inner()) {
-            Some(lco) => lco,
-            None => unsafe { hint::unreachable_unchecked() },
-        };
+        let (layout, ctrl_offset) =
+            unsafe { Self::calculate_layout_for(self.buckets_inner()).unwrap_unchecked() };
         (
             // SAFETY: The caller must uphold the safety contract for `allocation_info` method.
             unsafe { NonNull::new_unchecked(self.ctrl.as_ptr().sub(ctrl_offset)) },
