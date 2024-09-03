@@ -586,21 +586,15 @@ impl RawTable {
         Bucket::from_base_index(self.data_end(), index)
     }
 
-    /// Erases an element from the table without dropping it.
-    #[inline]
-    unsafe fn erase_no_drop(&mut self, item: &Bucket) {
-        let index = self.bucket_index(item);
-        self.erase_inner(index);
-    }
-
-    /// Erases an element from the table, dropping it in place.
+    /// Erases an element from the table.
     #[inline]
     #[allow(clippy::needless_pass_by_value)]
     pub(crate) unsafe fn erase(&mut self, item: Bucket) {
-        self.erase_no_drop(&item);
+        let index = self.bucket_index(&item);
+        self.erase_bucket_index(index);
     }
 
-    /// Finds and erases an element from the table, dropping it in place.
+    /// Finds and erases an element from the table.
     /// Returns true if an element was found.
     #[inline]
     pub(crate) fn erase_entry(&mut self, hash: u64, eq: impl FnMut(&usize) -> bool) -> bool {
@@ -621,13 +615,9 @@ impl RawTable {
     #[inline]
     #[allow(clippy::needless_pass_by_value)]
     pub(crate) unsafe fn remove(&mut self, item: Bucket) -> (usize, InsertSlot) {
-        self.erase_no_drop(&item);
-        (
-            item.read(),
-            InsertSlot {
-                index: self.bucket_index(&item),
-            },
-        )
+        let index = self.bucket_index(&item);
+        self.erase_bucket_index(index);
+        (item.read(), InsertSlot { index })
     }
 
     /// Finds and removes an element from the table, returning it.
@@ -2404,7 +2394,7 @@ impl RawTable {
     /// [`Bucket::as_ptr`]: Bucket::as_ptr
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    unsafe fn erase_inner(&mut self, index: usize) {
+    unsafe fn erase_bucket_index(&mut self, index: usize) {
         debug_assert!(self.is_bucket_full(index));
 
         // This is the same as `index.wrapping_sub(Group::WIDTH) % self.buckets()` because
