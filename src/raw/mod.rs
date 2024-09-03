@@ -431,7 +431,7 @@ impl Bucket {
     /// [`RawTable::remove`]: crate::raw::RawTable::remove
     #[inline]
     unsafe fn read(&self) -> usize {
-        self.as_ptr().read()
+        *self.as_ptr()
     }
 
     /// Overwrites a memory location with the given `value` without reading
@@ -453,7 +453,7 @@ impl Bucket {
     /// [`Eq`]: https://doc.rust-lang.org/core/cmp/trait.Eq.html
     #[inline]
     unsafe fn write(&self, val: usize) {
-        self.as_ptr().write(val);
+        *self.as_ptr() = val;
     }
 
     /// Returns a shared immutable reference to the `value`.
@@ -508,8 +508,6 @@ pub(crate) struct RawTable {
 }
 
 impl RawTable {
-    const USIZE_BYTES: usize = mem::size_of::<usize>();
-
     #[inline]
     fn calculate_layout_for(buckets: usize) -> Result<(Layout, usize), LayoutError> {
         debug_assert!(buckets.is_power_of_two());
@@ -1809,7 +1807,7 @@ impl RawTable {
     /// (we start counting from "0", so that in the expression T[n], the "n" index actually one less than
     /// the "buckets" number of our `RawTable`, i.e. "n = RawTable::buckets() - 1"):
     ///
-    ///           `table.bucket_ptr(3, mem::size_of::<usize>())` returns a pointer that points here in the
+    ///           `table.bucket_ptr(3)` returns a pointer that points here in the
     ///           `data` part of the `RawTable`, i.e. to the start of T3
     ///                  |
     ///                  |               `base = table.data_end::<u8>()` points here
@@ -1834,11 +1832,10 @@ impl RawTable {
     /// [`RawTable::buckets`]: RawTable::buckets
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    unsafe fn bucket_ptr(&self, index: usize) -> *mut u8 {
+    unsafe fn bucket_ptr(&self, index: usize) -> *mut usize {
         debug_assert_ne!(self.bucket_mask, 0);
         debug_assert!(index < self.buckets_inner());
-        let base: *mut u8 = self.data_end_inner().as_ptr().cast();
-        base.sub((index + 1) * Self::USIZE_BYTES)
+        self.data_end_inner().as_ptr().sub(index + 1)
     }
 
     /// Returns pointer to one past last `data` element in the table as viewed from
@@ -2276,11 +2273,7 @@ impl RawTable {
             // * Both `src` and `dst` are properly aligned.
             //
             // * Both `src` and `dst` point to different region of memory.
-            ptr::copy_nonoverlapping(
-                self.bucket_ptr(full_byte_index),
-                new_table.bucket_ptr(new_index),
-                Self::USIZE_BYTES,
-            );
+            *new_table.bucket_ptr(new_index) = *self.bucket_ptr(full_byte_index);
         }
 
         // The hash function didn't panic, so we can safely set the
@@ -2367,14 +2360,14 @@ impl RawTable {
                     // If the target slot is empty, simply move the current
                     // element into the new slot and clear the old control
                     // byte.
-                    ptr::copy_nonoverlapping(i_p, new_i_p, Self::USIZE_BYTES);
+                    *new_i_p = *i_p;
                     continue 'outer;
                 } else {
                     // If the target slot is occupied, swap the two elements
                     // and then continue processing the element that we just
                     // swapped into the old slot.
                     debug_assert_eq!(prev_ctrl, DELETED);
-                    ptr::swap_nonoverlapping(i_p, new_i_p, Self::USIZE_BYTES);
+                    ptr::swap_nonoverlapping(i_p, new_i_p, 1);
                     continue 'inner;
                 }
             }
