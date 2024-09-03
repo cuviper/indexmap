@@ -257,8 +257,7 @@ impl Bucket {
     ///
     /// * the `base` pointer must not be `dangling` and must points to the
     ///   end of the first `value element` from the `data part` of the table, i.e.
-    ///   must be the pointer that returned by [`RawTable::data_end`] or by
-    ///   [`RawTable::data_end_inner`];
+    ///   must be the pointer that returned by [`RawTable::data_end`];
     ///
     /// * `index` must not be greater than `RawTable.bucket_mask`, i.e.
     ///   `index <= RawTable.bucket_mask` or, in other words, `(index + 1)`
@@ -269,7 +268,6 @@ impl Bucket {
     /// [`<*mut T>::sub`]: https://doc.rust-lang.org/core/primitive.pointer.html#method.sub-1
     /// [`NonNull::new_unchecked`]: https://doc.rust-lang.org/stable/std/ptr/struct.NonNull.html#method.new_unchecked
     /// [`RawTable::data_end`]: crate::raw::RawTable::data_end
-    /// [`RawTable::data_end_inner`]: RawTable::data_end_inner
     /// [`RawTable::buckets`]: crate::raw::RawTable::buckets
     /// [`RawTable::buckets_inner`]: RawTable::buckets_inner
     #[inline]
@@ -318,8 +316,7 @@ impl Bucket {
     ///
     /// * `base` contained pointer must not be `dangling` and must point to the
     ///   end of the first `element` from the `data part` of the table, i.e.
-    ///   must be a pointer that returns by [`RawTable::data_end`] or by
-    ///   [`RawTable::data_end_inner`];
+    ///   must be a pointer that returns by [`RawTable::data_end`];
     ///
     /// * `self` also must not contain dangling pointer;
     ///
@@ -328,7 +325,6 @@ impl Bucket {
     /// [`Bucket`]: crate::raw::Bucket
     /// [`from_base_index`]: crate::raw::Bucket::from_base_index
     /// [`RawTable::data_end`]: crate::raw::RawTable::data_end
-    /// [`RawTable::data_end_inner`]: RawTable::data_end_inner
     /// [`RawTable`]: crate::raw::RawTable
     /// [`<*const T>::offset_from`]: https://doc.rust-lang.org/nightly/core/primitive.pointer.html#method.offset_from
     #[inline]
@@ -545,35 +541,6 @@ impl RawTable {
         debug_assert!(buckets.is_power_of_two());
 
         Self::new_uninitialized_inner(buckets, fallibility)
-    }
-
-    /// Returns pointer to one past last `data` element in the table as viewed from
-    /// the start point of the allocation.
-    ///
-    /// The caller must ensure that the `RawTable` outlives the returned [`NonNull<usize>`],
-    /// otherwise using it may result in [`undefined behavior`].
-    ///
-    /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
-    #[inline]
-    fn data_end(&self) -> NonNull<usize> {
-        //                        `self.ctrl.cast()` returns pointer that
-        //                        points here (to the end of `T0`)
-        //                          ∨
-        // [Pad], T_n, ..., T1, T0, |CT0, CT1, ..., CT_n|, CTa_0, CTa_1, ..., CTa_m
-        //                           \________  ________/
-        //                                    \/
-        //       `n = buckets - 1`, i.e. `RawTable::buckets() - 1`
-        //
-        // where: T0...T_n  - our stored data;
-        //        CT0...CT_n - control bytes or metadata for `data`.
-        //        CTa_0...CTa_m - additional control bytes, where `m = Group::WIDTH - 1` (so that the search
-        //                        with loading `Group` bytes from the heap works properly, even if the result
-        //                        of `h1(hash) & self.bucket_mask` is equal to `self.bucket_mask`). See also
-        //                        `RawTable::set_ctrl` function.
-        //
-        // P.S. `h1(hash) & self.bucket_mask` is the same as `hash as usize % self.buckets()` because the number
-        // of buckets is a power of two, and `self.bucket_mask = self.buckets() - 1`.
-        self.ctrl.cast()
     }
 
     /// Returns pointer to start of data table.
@@ -1720,7 +1687,7 @@ impl RawTable {
         //
         // P.S. `h1(hash) & self.bucket_mask` is the same as `hash as usize % self.buckets()` because the number
         // of buckets is a power of two, and `self.bucket_mask = self.buckets() - 1`.
-        let data = Bucket::from_base_index(self.data_end_inner(), 0);
+        let data = Bucket::from_base_index(self.data_end(), 0);
         RawIter {
             // SAFETY: See explanation above
             iter: RawIterRange::new(self.ctrl.as_ptr(), data, self.buckets_inner()),
@@ -1782,7 +1749,7 @@ impl RawTable {
     unsafe fn bucket_inner(&self, index: usize) -> Bucket {
         debug_assert_ne!(self.bucket_mask, 0);
         debug_assert!(index < self.buckets_inner());
-        Bucket::from_base_index(self.data_end_inner(), index)
+        Bucket::from_base_index(self.data_end(), index)
     }
 
     /// Returns a raw `*mut u8` pointer to the start of the `data` element in the table
@@ -1835,7 +1802,7 @@ impl RawTable {
     unsafe fn bucket_ptr(&self, index: usize) -> *mut usize {
         debug_assert_ne!(self.bucket_mask, 0);
         debug_assert!(index < self.buckets_inner());
-        self.data_end_inner().as_ptr().sub(index + 1)
+        self.data_end().as_ptr().sub(index + 1)
     }
 
     /// Returns pointer to one past last `data` element in the table as viewed from
@@ -1871,7 +1838,7 @@ impl RawTable {
     ///
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    fn data_end_inner(&self) -> NonNull<usize> {
+    fn data_end(&self) -> NonNull<usize> {
         self.ctrl.cast()
     }
 
