@@ -524,12 +524,6 @@ impl RawTable {
         Self::NEW
     }
 
-    /// Allocates a new hash table with at least enough capacity for inserting
-    /// the given number of elements without reallocating.
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
-        Self::with_capacity_inner(capacity)
-    }
-
     /// Allocates a new hash table with the given number of buckets.
     ///
     /// The control bytes are left uninitialized.
@@ -703,7 +697,7 @@ impl RawTable {
         if min_buckets < self.buckets() {
             // Fast path if the table is empty
             if self.items == 0 {
-                *self = Self::with_capacity_inner(min_size);
+                *self = Self::with_capacity(min_size);
             } else {
                 // Avoid `Result::unwrap_or_else` because it bloats LLVM IR.
                 unsafe {
@@ -1180,10 +1174,10 @@ impl RawTable {
     ///
     /// [`fallible_with_capacity`]: RawTable::fallible_with_capacity
     /// [`abort`]: https://doc.rust-lang.org/alloc/alloc/fn.handle_alloc_error.html
-    fn with_capacity_inner(capacity: usize) -> Self {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
         // Avoid `Result::unwrap_or_else` because it bloats LLVM IR.
         match Self::fallible_with_capacity(capacity, Fallibility::Infallible) {
-            Ok(table_inner) => table_inner,
+            Ok(table) => table,
             // SAFETY: All allocation errors will be caught inside `RawTable::new_uninitialized`.
             Err(_) => unsafe { hint::unreachable_unchecked() },
         }
