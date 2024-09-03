@@ -26,7 +26,7 @@ pub(super) struct DebugIndices<'a>(pub &'a RawTable);
 impl core::fmt::Debug for DebugIndices<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         // SAFETY: we're not letting any of the buckets escape this function
-        let indices = unsafe { self.0.iter().map(|raw_bucket| *raw_bucket.as_ref()) };
+        let indices = unsafe { self.0.iter().map(|raw_bucket| raw_bucket.read()) };
         f.debug_list().entries(indices).finish()
     }
 }
@@ -64,7 +64,7 @@ impl<K, V> IndexMapCore<K, V> {
         // SAFETY: We're not mutating between find and read/insert.
         unsafe {
             match self.indices.find_or_find_insert_slot(hash, eq, hasher) {
-                Ok(raw_bucket) => Ok(*raw_bucket.as_ref()),
+                Ok(raw_bucket) => Ok(raw_bucket.read()),
                 Err(slot) => {
                     let index = self.indices.len();
                     self.indices.insert_in_slot(hash, slot, index);
@@ -80,7 +80,7 @@ impl<K, V> IndexMapCore<K, V> {
         mut is_match: impl FnMut(&K) -> bool,
     ) -> Result<RawTableEntry<'_, K, V>, &mut Self> {
         let entries = &*self.entries;
-        let eq = move |&i: &usize| is_match(&entries[i].key);
+        let eq = move |i: usize| is_match(&entries[i].key);
         match self.indices.find(hash.get(), eq) {
             // SAFETY: The bucket is valid because we *just* found it in this map.
             Some(raw_bucket) => Ok(unsafe { RawTableEntry::new(self, raw_bucket) }),
@@ -90,7 +90,7 @@ impl<K, V> IndexMapCore<K, V> {
 
     pub(super) fn index_raw_entry(&mut self, index: usize) -> Option<RawTableEntry<'_, K, V>> {
         let hash = self.entries.get(index)?.hash;
-        let raw_bucket = self.indices.find(hash.get(), move |&i| i == index)?;
+        let raw_bucket = self.indices.find(hash.get(), move |i| i == index)?;
         // SAFETY: The bucket is valid because we *just* found it in this map.
         Some(unsafe { RawTableEntry::new(self, raw_bucket) })
     }
@@ -122,7 +122,7 @@ impl<'a, K, V> RawTableEntry<'a, K, V> {
     #[inline]
     pub(super) fn index(&self) -> usize {
         // SAFETY: we have `&mut map` keeping the bucket stable
-        unsafe { *self.raw_bucket.as_ref() }
+        unsafe { self.raw_bucket.read() }
     }
 
     #[inline]

@@ -32,28 +32,28 @@ pub(crate) struct IndexMapCore<K, V> {
 }
 
 #[inline(always)]
-fn get_hash<K, V>(entries: &[Bucket<K, V>]) -> impl Fn(&usize) -> u64 + '_ {
-    move |&i| entries[i].hash.get()
+fn get_hash<K, V>(entries: &[Bucket<K, V>]) -> impl Fn(usize) -> u64 + '_ {
+    move |i| entries[i].hash.get()
 }
 
 #[inline]
 fn equivalent<'a, K, V, Q: ?Sized + Equivalent<K>>(
     key: &'a Q,
     entries: &'a [Bucket<K, V>],
-) -> impl Fn(&usize) -> bool + 'a {
-    move |&i| Q::equivalent(key, &entries[i].key)
+) -> impl Fn(usize) -> bool + 'a {
+    move |i| Q::equivalent(key, &entries[i].key)
 }
 
 #[inline]
 fn erase_index(table: &mut RawTable, hash: HashValue, index: usize) {
-    let erased = table.erase_entry(hash.get(), move |&i| i == index);
+    let erased = table.erase_entry(hash.get(), move |i| i == index);
     debug_assert!(erased);
 }
 
 #[inline]
 fn update_index(table: &mut RawTable, hash: HashValue, old: usize, new: usize) {
     let index = table
-        .get_mut(hash.get(), move |&i| i == old)
+        .get_mut(hash.get(), move |i| i == old)
         .expect("index not found");
     *index = new;
 }
@@ -325,7 +325,7 @@ impl<K, V> IndexMapCore<K, V> {
         Q: ?Sized + Equivalent<K>,
     {
         let eq = equivalent(key, &self.entries);
-        self.indices.get(hash.get(), eq).copied()
+        self.indices.get(hash.get(), eq)
     }
 
     pub(crate) fn insert_full(&mut self, hash: HashValue, key: K, value: V) -> (usize, Option<V>)
@@ -383,7 +383,7 @@ impl<K, V> IndexMapCore<K, V> {
         // Increment others first so we don't have duplicate indices.
         self.increment_indices(index, end);
         let entries = &*self.entries;
-        self.indices.insert(hash.get(), index, move |&i| {
+        self.indices.insert(hash.get(), index, move |i| {
             // Adjust for the incremented indices to find hashes.
             debug_assert_ne!(i, index);
             let i = if i < index { i } else { i - 1 };
@@ -507,7 +507,7 @@ impl<K, V> IndexMapCore<K, V> {
             .indices
             .get_many_mut(
                 [self.entries[a].hash.get(), self.entries[b].hash.get()],
-                move |i, &x| if i == 0 { x == a } else { x == b },
+                move |i, x| if i == 0 { x == a } else { x == b },
             )
             .expect("indices not found");
 

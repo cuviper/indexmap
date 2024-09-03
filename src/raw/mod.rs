@@ -426,7 +426,7 @@ impl Bucket {
     /// [`RawTable`]: crate::raw::RawTable
     /// [`RawTable::remove`]: crate::raw::RawTable::remove
     #[inline]
-    unsafe fn read(&self) -> usize {
+    pub(crate) unsafe fn read(&self) -> usize {
         *self.as_ptr()
     }
 
@@ -450,18 +450,6 @@ impl Bucket {
     #[inline]
     unsafe fn write(&self, val: usize) {
         *self.as_ptr() = val;
-    }
-
-    /// Returns a shared immutable reference to the `value`.
-    ///
-    /// # Safety
-    ///
-    /// See [`NonNull::as_ref`] for safety concerns.
-    ///
-    /// [`NonNull::as_ref`]: https://doc.rust-lang.org/core/ptr/struct.NonNull.html#method.as_ref
-    #[inline]
-    pub(crate) unsafe fn as_ref<'a>(&self) -> &'a usize {
-        &*self.as_ptr()
     }
 
     /// Returns a unique mutable reference to the `value`.
@@ -597,7 +585,7 @@ impl RawTable {
     /// Finds and erases an element from the table.
     /// Returns true if an element was found.
     #[inline]
-    pub(crate) fn erase_entry(&mut self, hash: u64, eq: impl FnMut(&usize) -> bool) -> bool {
+    pub(crate) fn erase_entry(&mut self, hash: u64, eq: impl FnMut(usize) -> bool) -> bool {
         // Avoid `Option::map` because it bloats LLVM IR.
         if let Some(bucket) = self.find(hash, eq) {
             unsafe {
@@ -625,7 +613,7 @@ impl RawTable {
     pub(crate) fn remove_entry(
         &mut self,
         hash: u64,
-        eq: impl FnMut(&usize) -> bool,
+        eq: impl FnMut(usize) -> bool,
     ) -> Option<usize> {
         // Avoid `Option::map` because it bloats LLVM IR.
         match self.find(hash, eq) {
@@ -646,7 +634,7 @@ impl RawTable {
 
     /// Shrinks the table to fit `max(self.len(), min_size)` elements.
     #[inline]
-    pub(crate) fn shrink_to(&mut self, min_size: usize, hasher: impl Fn(&usize) -> u64) {
+    pub(crate) fn shrink_to(&mut self, min_size: usize, hasher: impl Fn(usize) -> u64) {
         // Calculate the minimal number of elements that we need to reserve
         // space for.
         let min_size = usize::max(self.items, min_size);
@@ -692,7 +680,7 @@ impl RawTable {
     /// Ensures that at least `additional` items can be inserted into the table
     /// without reallocation.
     #[inline]
-    pub(crate) fn reserve(&mut self, additional: usize, hasher: impl Fn(&usize) -> u64) {
+    pub(crate) fn reserve(&mut self, additional: usize, hasher: impl Fn(usize) -> u64) {
         if unlikely(additional > self.growth_left) {
             // Avoid `Result::unwrap_or_else` because it bloats LLVM IR.
             unsafe {
@@ -715,7 +703,7 @@ impl RawTable {
     pub(crate) fn try_reserve(
         &mut self,
         additional: usize,
-        hasher: impl Fn(&usize) -> u64,
+        hasher: impl Fn(usize) -> u64,
     ) -> Result<(), TryReserveError> {
         if additional > self.growth_left {
             // SAFETY: The [`RawTable`] must already have properly initialized control
@@ -739,7 +727,7 @@ impl RawTable {
     unsafe fn reserve_rehash(
         &mut self,
         additional: usize,
-        hasher: impl Fn(&usize) -> u64,
+        hasher: impl Fn(usize) -> u64,
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         unsafe {
@@ -779,7 +767,7 @@ impl RawTable {
     unsafe fn resize(
         &mut self,
         capacity: usize,
-        hasher: impl Fn(&usize) -> u64,
+        hasher: impl Fn(usize) -> u64,
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         // SAFETY:
@@ -797,7 +785,7 @@ impl RawTable {
         &mut self,
         hash: u64,
         value: usize,
-        hasher: impl Fn(&usize) -> u64,
+        hasher: impl Fn(usize) -> u64,
     ) -> Bucket {
         unsafe {
             // SAFETY:
@@ -853,8 +841,8 @@ impl RawTable {
     pub(crate) fn find_or_find_insert_slot(
         &mut self,
         hash: u64,
-        mut eq: impl FnMut(&usize) -> bool,
-        hasher: impl Fn(&usize) -> u64,
+        mut eq: impl FnMut(usize) -> bool,
+        hasher: impl Fn(usize) -> u64,
     ) -> Result<Bucket, InsertSlot> {
         self.reserve(1, hasher);
 
@@ -899,7 +887,7 @@ impl RawTable {
 
     /// Searches for an element in the table.
     #[inline]
-    pub(crate) fn find(&self, hash: u64, mut eq: impl FnMut(&usize) -> bool) -> Option<Bucket> {
+    pub(crate) fn find(&self, hash: u64, mut eq: impl FnMut(usize) -> bool) -> Option<Bucket> {
         unsafe {
             // SAFETY:
             // 1. The [`RawTable`] must already have properly initialized control bytes since we
@@ -920,10 +908,10 @@ impl RawTable {
 
     /// Gets a reference to an element in the table.
     #[inline]
-    pub(crate) fn get(&self, hash: u64, eq: impl FnMut(&usize) -> bool) -> Option<&usize> {
+    pub(crate) fn get(&self, hash: u64, eq: impl FnMut(usize) -> bool) -> Option<usize> {
         // Avoid `Option::map` because it bloats LLVM IR.
         match self.find(hash, eq) {
-            Some(bucket) => Some(unsafe { bucket.as_ref() }),
+            Some(bucket) => Some(unsafe { bucket.read() }),
             None => None,
         }
     }
@@ -933,7 +921,7 @@ impl RawTable {
     pub(crate) fn get_mut(
         &mut self,
         hash: u64,
-        eq: impl FnMut(&usize) -> bool,
+        eq: impl FnMut(usize) -> bool,
     ) -> Option<&mut usize> {
         // Avoid `Option::map` because it bloats LLVM IR.
         match self.find(hash, eq) {
@@ -954,7 +942,7 @@ impl RawTable {
     pub(crate) fn get_many_mut<const N: usize>(
         &mut self,
         hashes: [u64; N],
-        eq: impl FnMut(usize, &usize) -> bool,
+        eq: impl FnMut(usize, usize) -> bool,
     ) -> Option<[&'_ mut usize; N]> {
         unsafe {
             let ptrs = self.get_many_mut_pointers(hashes, eq)?;
@@ -975,7 +963,7 @@ impl RawTable {
     unsafe fn get_many_mut_pointers<const N: usize>(
         &mut self,
         hashes: [u64; N],
-        mut eq: impl FnMut(usize, &usize) -> bool,
+        mut eq: impl FnMut(usize, usize) -> bool,
     ) -> Option<[*mut usize; N]> {
         // TODO use `MaybeUninit::uninit_array` here instead once that's stable.
         let mut outs: MaybeUninit<[*mut usize; N]> = MaybeUninit::uninit();
@@ -983,7 +971,7 @@ impl RawTable {
 
         for (i, &hash) in hashes.iter().enumerate() {
             let cur = self.find(hash, |k| eq(i, k))?;
-            *(*outs_ptr).get_unchecked_mut(i) = cur.as_mut();
+            *(*outs_ptr).get_unchecked_mut(i) = cur.as_ptr();
         }
 
         // TODO use `MaybeUninit::array_assume_init` here instead once that's stable.
@@ -1248,12 +1236,12 @@ impl RawTable {
     /// changes to the `items` or `growth_left` field of the table.
     ///
     /// The table must have at least 1 empty or deleted `bucket`, otherwise, if the
-    /// `eq: &mut dyn FnMut(&usize) -> bool` function does not return `true`, this function
+    /// `eq: &mut dyn FnMut(usize) -> bool` function does not return `true`, this function
     /// will never return (will go into an infinite loop) for tables larger than the group
     /// width, or return an index outside of the table indices range if the table is less
     /// than the group width.
     ///
-    /// This function is guaranteed to provide the `eq: &mut dyn FnMut(&usize) -> bool`
+    /// This function is guaranteed to provide the `eq: &mut dyn FnMut(usize) -> bool`
     /// function with only `FULL` buckets' indices and return the `index` of the found
     /// element (as `Ok(index)`). If the element is not found and there is at least 1
     /// empty or deleted [`Bucket`] in the table, the function is guaranteed to return
@@ -1277,7 +1265,7 @@ impl RawTable {
     unsafe fn find_or_find_insert_slot_inner(
         &self,
         hash: u64,
-        eq: &mut dyn FnMut(&usize) -> bool,
+        eq: &mut dyn FnMut(usize) -> bool,
     ) -> Result<usize, InsertSlot> {
         let mut insert_slot = None;
 
@@ -1305,7 +1293,7 @@ impl RawTable {
             for bit in group.match_byte(h2_hash) {
                 let index = (probe_seq.pos + bit) & self.bucket_mask;
 
-                if likely(eq(self.bucket(index).as_ref())) {
+                if likely(eq(self.bucket(index).read())) {
                     return Ok(index);
                 }
             }
@@ -1473,10 +1461,10 @@ impl RawTable {
     /// changes to the `items` or `growth_left` field of the table.
     ///
     /// The table must have at least 1 empty `bucket`, otherwise, if the
-    /// `eq: &mut dyn FnMut(&usize) -> bool` function does not return `true`,
+    /// `eq: &mut dyn FnMut(usize) -> bool` function does not return `true`,
     /// this function will also never return (will go into an infinite loop).
     ///
-    /// This function is guaranteed to provide the `eq: &mut dyn FnMut(&usize) -> bool`
+    /// This function is guaranteed to provide the `eq: &mut dyn FnMut(usize) -> bool`
     /// function with only `FULL` buckets' indices and return the `index` of the found
     /// element as `Some(index)`, so the index will always be in the range
     /// `0..self.buckets()`.
@@ -1488,7 +1476,7 @@ impl RawTable {
     ///
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline(always)]
-    unsafe fn find_inner(&self, hash: u64, eq: &mut dyn FnMut(&usize) -> bool) -> Option<usize> {
+    unsafe fn find_inner(&self, hash: u64, eq: &mut dyn FnMut(usize) -> bool) -> Option<usize> {
         let h2_hash = h2(hash);
         let mut probe_seq = self.probe_seq(hash);
 
@@ -1514,7 +1502,7 @@ impl RawTable {
                 // of buckets is a power of two, and `self.bucket_mask = self.buckets() - 1`.
                 let index = (probe_seq.pos + bit) & self.bucket_mask;
 
-                if likely(eq(self.bucket(index).as_ref())) {
+                if likely(eq(self.bucket(index).read())) {
                     return Some(index);
                 }
             }
@@ -2030,7 +2018,7 @@ impl RawTable {
     unsafe fn reserve_rehash_inner(
         &mut self,
         additional: usize,
-        hasher: &dyn Fn(&usize) -> u64,
+        hasher: &dyn Fn(usize) -> u64,
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         // Avoid `Option::ok_or_else` because it bloats LLVM IR.
@@ -2153,7 +2141,7 @@ impl RawTable {
     unsafe fn resize_inner(
         &mut self,
         capacity: usize,
-        hasher: &dyn Fn(&usize) -> u64,
+        hasher: &dyn Fn(usize) -> u64,
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         debug_assert!(self.items <= capacity);
@@ -2166,7 +2154,7 @@ impl RawTable {
         // function ensures that the control bytes are properly initialized.
         for full_byte_index in self.full_buckets_indices() {
             // This may panic.
-            let hash = hasher(self.bucket_inner(full_byte_index).as_ref());
+            let hash = hasher(self.bucket_inner(full_byte_index).read());
 
             // SAFETY:
             // We can use a simpler version of insert() here since:
@@ -2231,7 +2219,7 @@ impl RawTable {
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    unsafe fn rehash_in_place(&mut self, hasher: &dyn Fn(&usize) -> u64) {
+    unsafe fn rehash_in_place(&mut self, hasher: &dyn Fn(usize) -> u64) {
         // If the hash function panics then properly clean up any elements
         // that we haven't rehashed yet. We unfortunately can't preserve the
         // element since we lost their hash and have no way of recovering it
@@ -2254,7 +2242,7 @@ impl RawTable {
 
             'inner: loop {
                 // Hash the current item
-                let hash = hasher(guard.bucket_inner(i).as_ref());
+                let hash = hasher(guard.bucket_inner(i).read());
 
                 // Search for a suitable place to put it
                 //
@@ -2520,7 +2508,7 @@ impl RawTable {
     }
 
     /// Variant of `clone_from` to use when a hasher is available.
-    pub(crate) fn clone_from_with_hasher(&mut self, source: &Self, hasher: impl Fn(&usize) -> u64) {
+    pub(crate) fn clone_from_with_hasher(&mut self, source: &Self, hasher: impl Fn(usize) -> u64) {
         // If we have enough capacity in the table, just clear it and insert
         // elements one by one. We don't do this if we have the same number of
         // buckets as the source since we can just copy the contents directly
@@ -2540,8 +2528,8 @@ impl RawTable {
             unsafe {
                 for item in source.iter() {
                     // This may panic.
-                    let item = item.as_ref().clone();
-                    let hash = hasher(&item);
+                    let item = item.read();
+                    let hash = hasher(item);
 
                     // We can use a simpler version of insert() here since:
                     // - there are no DELETED entries.
@@ -2958,7 +2946,7 @@ impl FusedIterator for FullBucketsIndices {}
 mod test_map {
     use super::*;
 
-    fn rehash_in_place(table: &mut RawTable, hasher: impl Fn(&usize) -> u64) {
+    fn rehash_in_place(table: &mut RawTable, hasher: impl Fn(usize) -> u64) {
         unsafe {
             table.rehash_in_place(&hasher);
         }
@@ -2967,25 +2955,25 @@ mod test_map {
     #[test]
     fn rehash() {
         let mut table = RawTable::new();
-        let hasher = |i: &usize| *i as u64;
+        let hasher = |i: usize| i as u64;
         for i in 0..100 {
             table.insert(i as u64, i, hasher);
         }
 
         for i in 0..100 {
             unsafe {
-                assert_eq!(table.find(i as u64, |x| *x == i).map(|b| b.read()), Some(i));
+                assert_eq!(table.find(i as u64, |x| x == i).map(|b| b.read()), Some(i));
             }
-            assert!(table.find(i as u64 + 100, |x| *x == i + 100).is_none());
+            assert!(table.find(i as u64 + 100, |x| x == i + 100).is_none());
         }
 
         rehash_in_place(&mut table, hasher);
 
         for i in 0..100 {
             unsafe {
-                assert_eq!(table.find(i as u64, |x| *x == i).map(|b| b.read()), Some(i));
+                assert_eq!(table.find(i as u64, |x| x == i).map(|b| b.read()), Some(i));
             }
-            assert!(table.find(i as u64 + 100, |x| *x == i + 100).is_none());
+            assert!(table.find(i as u64 + 100, |x| x == i + 100).is_none());
         }
     }
 

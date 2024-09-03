@@ -244,8 +244,8 @@ impl<'a, K, V, S> RawEntryBuilder<'a, K, V, S> {
     {
         let hash = HashValue(hash as usize);
         let entries = &*self.map.core.entries;
-        let eq = move |&i: &usize| is_match(&entries[i].key);
-        self.map.core.indices.get(hash.get(), eq).copied()
+        let eq = move |i: usize| is_match(&entries[i].key);
+        self.map.core.indices.get(hash.get(), eq)
     }
 }
 
