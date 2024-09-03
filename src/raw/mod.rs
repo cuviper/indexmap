@@ -524,19 +524,6 @@ impl RawTable {
         Self::NEW
     }
 
-    /// Allocates a new hash table with the given number of buckets.
-    ///
-    /// The control bytes are left uninitialized.
-    #[inline]
-    unsafe fn new_uninitialized(
-        buckets: usize,
-        fallibility: Fallibility,
-    ) -> Result<Self, TryReserveError> {
-        debug_assert!(buckets.is_power_of_two());
-
-        Self::new_uninitialized_inner(buckets, fallibility)
-    }
-
     /// Returns pointer to start of data table.
     #[inline]
     unsafe fn data_start(&self) -> NonNull<usize> {
@@ -1107,7 +1094,7 @@ impl RawTable {
     ///
     /// [`Allocator`]: https://doc.rust-lang.org/alloc/alloc/trait.Allocator.html
     #[inline]
-    unsafe fn new_uninitialized_inner(
+    unsafe fn new_uninitialized(
         buckets: usize,
         fallibility: Fallibility,
     ) -> Result<Self, TryReserveError> {
@@ -1152,7 +1139,7 @@ impl RawTable {
                 let buckets =
                     capacity_to_buckets(capacity).ok_or_else(|| fallibility.capacity_overflow())?;
 
-                let result = Self::new_uninitialized_inner(buckets, fallibility)?;
+                let result = Self::new_uninitialized(buckets, fallibility)?;
                 // SAFETY: We checked that the table is allocated and therefore the table already has
                 // `self.bucket_mask + 1 + Group::WIDTH` number of control bytes (see Self::calculate_layout_for)
                 // so writing `self.num_ctrl_bytes() == bucket_mask + 1 + Group::WIDTH` bytes is safe.
@@ -2521,16 +2508,14 @@ impl Clone for RawTable {
 
                 // If necessary, resize our table to match the source.
                 if self_.buckets() != source.buckets() {
-                    let new_inner = match Self::new_uninitialized_inner(
-                        source.buckets(),
-                        Fallibility::Infallible,
-                    ) {
-                        Ok(table) => table,
-                        Err(_) => hint::unreachable_unchecked(),
-                    };
-                    // Replace the old inner with new uninitialized one. It's ok, since if something gets
+                    let new =
+                        match Self::new_uninitialized(source.buckets(), Fallibility::Infallible) {
+                            Ok(table) => table,
+                            Err(_) => hint::unreachable_unchecked(),
+                        };
+                    // Replace the old self with new uninitialized one. It's ok, since if something gets
                     // wrong `ScopeGuard` will initialize all control bytes and leave empty table.
-                    **self_ = new_inner;
+                    **self_ = new;
                 }
 
                 // Cloning elements may fail (the clone function may panic), but the `ScopeGuard`
