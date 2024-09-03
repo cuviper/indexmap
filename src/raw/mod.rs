@@ -262,14 +262,13 @@ impl Bucket {
     /// * `index` must not be greater than `RawTable.bucket_mask`, i.e.
     ///   `index <= RawTable.bucket_mask` or, in other words, `(index + 1)`
     ///   must be no greater than the number returned by the function
-    ///   [`RawTable::buckets`] or [`RawTable::buckets_inner`].
+    ///   [`RawTable::buckets`].
     ///
     /// [`Bucket`]: crate::raw::Bucket
     /// [`<*mut T>::sub`]: https://doc.rust-lang.org/core/primitive.pointer.html#method.sub-1
     /// [`NonNull::new_unchecked`]: https://doc.rust-lang.org/stable/std/ptr/struct.NonNull.html#method.new_unchecked
     /// [`RawTable::data_end`]: crate::raw::RawTable::data_end
     /// [`RawTable::buckets`]: crate::raw::RawTable::buckets
-    /// [`RawTable::buckets_inner`]: RawTable::buckets_inner
     #[inline]
     unsafe fn from_base_index(base: NonNull<usize>, index: usize) -> Self {
         // Return a pointer to an `element` in
@@ -394,13 +393,12 @@ impl Bucket {
     /// * `self.to_base_index() + ofset` must not be greater than `RawTable.bucket_mask`,
     ///   i.e. `(self.to_base_index() + ofset) <= RawTable.bucket_mask` or, in other
     ///   words, `self.to_base_index() + ofset + 1` must be no greater than the number returned
-    ///   by the function [`RawTable::buckets`] or [`RawTable::buckets_inner`].
+    ///   by the function [`RawTable::buckets`].
     ///
     /// [`Bucket`]: crate::raw::Bucket
     /// [`<*mut T>::sub`]: https://doc.rust-lang.org/core/primitive.pointer.html#method.sub-1
     /// [`NonNull::new_unchecked`]: https://doc.rust-lang.org/stable/std/ptr/struct.NonNull.html#method.new_unchecked
     /// [`RawTable::buckets`]: crate::raw::RawTable::buckets
-    /// [`RawTable::buckets_inner`]: RawTable::buckets_inner
     #[inline]
     unsafe fn next_n(&self, offset: usize) -> Self {
         let ptr = self.ptr.as_ptr().sub(offset);
@@ -1561,7 +1559,7 @@ impl RawTable {
         // 3. The caller of this function guarantees that [`RawTable`] has already been allocated;
         // 4. We can use `Group::load_aligned` and `Group::store_aligned` here since we start from 0
         //    and go to the end with a step equal to `Group::WIDTH` (see Self::calculate_layout_for).
-        for i in (0..self.buckets_inner()).step_by(Group::WIDTH) {
+        for i in (0..self.buckets()).step_by(Group::WIDTH) {
             let group = Group::load_aligned(self.ctrl(i));
             let group = group.convert_special_to_empty_and_full_to_deleted();
             group.store_aligned(self.ctrl(i));
@@ -1572,18 +1570,18 @@ impl RawTable {
         //
         // SAFETY: The caller of this function guarantees that [`RawTable`]
         // has already been allocated
-        if unlikely(self.buckets_inner() < Group::WIDTH) {
+        if unlikely(self.buckets() < Group::WIDTH) {
             // SAFETY: We have `self.bucket_mask + 1 + Group::WIDTH` number of control bytes,
             // so copying `self.buckets() == self.bucket_mask + 1` bytes with offset equal to
             // `Group::WIDTH` is safe
             self.ctrl(0)
-                .copy_to(self.ctrl(Group::WIDTH), self.buckets_inner());
+                .copy_to(self.ctrl(Group::WIDTH), self.buckets());
         } else {
             // SAFETY: We have `self.bucket_mask + 1 + Group::WIDTH` number of
             // control bytes,so copying `Group::WIDTH` bytes with offset equal
             // to `self.buckets() == self.bucket_mask + 1` is safe
             self.ctrl(0)
-                .copy_to(self.ctrl(self.buckets_inner()), Group::WIDTH);
+                .copy_to(self.ctrl(self.buckets()), Group::WIDTH);
         }
     }
 
@@ -1633,7 +1631,7 @@ impl RawTable {
         let data = Bucket::from_base_index(self.data_end(), 0);
         RawIter {
             // SAFETY: See explanation above
-            iter: RawIterRange::new(self.ctrl.as_ptr(), data, self.buckets_inner()),
+            iter: RawIterRange::new(self.ctrl.as_ptr(), data, self.buckets()),
             items: self.items,
         }
     }
@@ -1691,7 +1689,7 @@ impl RawTable {
     #[inline]
     unsafe fn bucket_inner(&self, index: usize) -> Bucket {
         debug_assert_ne!(self.bucket_mask, 0);
-        debug_assert!(index < self.buckets_inner());
+        debug_assert!(index < self.buckets());
         Bucket::from_base_index(self.data_end(), index)
     }
 
@@ -1744,7 +1742,7 @@ impl RawTable {
     #[inline]
     unsafe fn bucket_ptr(&self, index: usize) -> *mut usize {
         debug_assert_ne!(self.bucket_mask, 0);
-        debug_assert!(index < self.buckets_inner());
+        debug_assert!(index < self.buckets());
         self.data_end().as_ptr().sub(index + 1)
     }
 
@@ -1971,11 +1969,6 @@ impl RawTable {
         self.ctrl.as_ptr().add(index)
     }
 
-    #[inline]
-    fn buckets_inner(&self) -> usize {
-        self.bucket_mask + 1
-    }
-
     /// Checks whether the bucket at `index` is full.
     ///
     /// # Safety
@@ -1983,7 +1976,7 @@ impl RawTable {
     /// The caller must ensure `index` is less than the number of buckets.
     #[inline]
     unsafe fn is_bucket_full(&self, index: usize) -> bool {
-        debug_assert!(index < self.buckets_inner());
+        debug_assert!(index < self.buckets());
         is_full(*self.ctrl(index))
     }
 
@@ -2233,7 +2226,7 @@ impl RawTable {
         // At this point, DELETED elements are elements that we haven't
         // rehashed yet. Find them and re-insert them at their ideal
         // position.
-        'outer: for i in 0..guard.buckets_inner() {
+        'outer: for i in 0..guard.buckets() {
             if *guard.ctrl(i) != DELETED {
                 continue;
             }
@@ -2312,7 +2305,7 @@ impl RawTable {
 
         // Avoid `Option::unwrap_or_else` because it bloats LLVM IR.
         let (layout, ctrl_offset) =
-            unsafe { Self::calculate_layout_for(self.buckets_inner()).unwrap_unchecked() };
+            unsafe { Self::calculate_layout_for(self.buckets()).unwrap_unchecked() };
         (
             // SAFETY: The caller must uphold the safety contract for `allocation_info` method.
             unsafe { NonNull::new_unchecked(self.ctrl.as_ptr().sub(ctrl_offset)) },
@@ -2438,7 +2431,7 @@ impl Clone for RawTable {
                 // and therefore сapacity overflow cannot occur, `self.buckets()` is power
                 // of two and all allocator errors will be caught inside `RawTable::new_uninitialized`.
                 let mut new_table =
-                    match Self::new_uninitialized(self.buckets_inner(), Fallibility::Infallible) {
+                    match Self::new_uninitialized(self.buckets(), Fallibility::Infallible) {
                         Ok(table) => table,
                         Err(_) => hint::unreachable_unchecked(),
                     };
@@ -2501,7 +2494,7 @@ impl RawTable {
         source
             .data_start()
             .as_ptr()
-            .copy_to_nonoverlapping(self.data_start().as_ptr(), self.buckets_inner());
+            .copy_to_nonoverlapping(self.data_start().as_ptr(), self.buckets());
 
         self.items = source.items;
         self.growth_left = source.growth_left;
@@ -2513,7 +2506,7 @@ impl RawTable {
         // elements one by one. We don't do this if we have the same number of
         // buckets as the source since we can just copy the contents directly
         // in that case.
-        if self.buckets_inner() != source.buckets_inner()
+        if self.buckets() != source.buckets()
             && bucket_mask_to_capacity(self.bucket_mask) >= source.len()
         {
             self.clear();
@@ -3016,14 +3009,14 @@ mod test_map {
                 // `Group::WIDTH` is safe
                 table
                     .ctrl(0)
-                    .copy_to(table.ctrl(Group::WIDTH), table.buckets_inner());
+                    .copy_to(table.ctrl(Group::WIDTH), table.buckets());
             } else {
                 // SAFETY: We have `self.bucket_mask + 1 + Group::WIDTH` number of
                 // control bytes,so copying `Group::WIDTH` bytes with offset equal
                 // to `self.buckets() == self.bucket_mask + 1` is safe
                 table
                     .ctrl(0)
-                    .copy_to(table.ctrl(table.buckets_inner()), Group::WIDTH);
+                    .copy_to(table.ctrl(table.buckets()), Group::WIDTH);
             }
             drop(table);
         }
