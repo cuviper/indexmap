@@ -1,10 +1,8 @@
 use crate::TryReserveError;
 use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout, LayoutError};
 use core::iter::FusedIterator;
-use core::mem;
-use core::mem::MaybeUninit;
-use core::ptr::NonNull;
-use core::{hint, ptr};
+use core::mem::{self, MaybeUninit};
+use core::ptr::{self, NonNull};
 
 #[macro_use]
 mod macros;
@@ -612,14 +610,10 @@ impl RawTable {
                     // 1. We know for sure that `min_size >= self.items`.
                     // 2. The [`RawTable`] must already have properly initialized control bytes since
                     //    we will never expose RawTable::new_uninitialized in a public API.
-                    if self
-                        .resize(min_size, hasher, Fallibility::Infallible)
-                        .is_err()
-                    {
-                        // SAFETY: The result of calling the `resize` function cannot be an error
-                        // because `fallibility == Fallibility::Infallible.
-                        hint::unreachable_unchecked()
-                    }
+                    // 3. The result of calling the `resize` function cannot be an error
+                    //    because `fallibility == Fallibility::Infallible.
+                    self.resize(min_size, hasher, Fallibility::Infallible)
+                        .unwrap_unchecked();
                 }
             }
         }
@@ -632,15 +626,13 @@ impl RawTable {
         if unlikely(additional > self.growth_left) {
             // Avoid `Result::unwrap_or_else` because it bloats LLVM IR.
             unsafe {
-                // SAFETY: The [`RawTable`] must already have properly initialized control
-                // bytes since we will never expose RawTable::new_uninitialized in a public API.
-                if self
-                    .reserve_rehash(additional, hasher, Fallibility::Infallible)
-                    .is_err()
-                {
-                    // SAFETY: All allocation errors will be caught inside `RawTable::reserve_rehash`.
-                    hint::unreachable_unchecked()
-                }
+                // SAFETY:
+                // 1. The [`RawTable`] must already have properly initialized control bytes
+                //    since we will never expose RawTable::new_uninitialized in a public API.
+                // 2. The result of calling the `resize` function cannot be an error
+                //    because `fallibility == Fallibility::Infallible.
+                self.reserve_rehash(additional, hasher, Fallibility::Infallible)
+                    .unwrap_unchecked();
             }
         }
     }
@@ -1048,10 +1040,9 @@ impl RawTable {
     /// [`abort`]: https://doc.rust-lang.org/alloc/alloc/fn.handle_alloc_error.html
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         // Avoid `Result::unwrap_or_else` because it bloats LLVM IR.
-        match Self::fallible_with_capacity(capacity, Fallibility::Infallible) {
-            Ok(table) => table,
-            // SAFETY: All allocation errors will be caught inside `RawTable::new_uninitialized`.
-            Err(_) => unsafe { hint::unreachable_unchecked() },
+        // SAFETY: All allocation errors will be caught inside `RawTable::new_uninitialized`.
+        unsafe {
+            Self::fallible_with_capacity(capacity, Fallibility::Infallible).unwrap_unchecked()
         }
     }
 
@@ -2356,10 +2347,8 @@ impl Clone for RawTable {
                 // and therefore сapacity overflow cannot occur, `self.buckets()` is power
                 // of two and all allocator errors will be caught inside `RawTable::new_uninitialized`.
                 let mut new_table =
-                    match Self::new_uninitialized(self.buckets(), Fallibility::Infallible) {
-                        Ok(table) => table,
-                        Err(_) => hint::unreachable_unchecked(),
-                    };
+                    Self::new_uninitialized(self.buckets(), Fallibility::Infallible)
+                        .unwrap_unchecked();
 
                 // Cloning elements may fail (the clone function may panic). But we don't
                 // need to worry about uninitialized control bits, since:
@@ -2388,11 +2377,8 @@ impl Clone for RawTable {
 
                 // If necessary, resize our table to match the source.
                 if self_.buckets() != source.buckets() {
-                    let new =
-                        match Self::new_uninitialized(source.buckets(), Fallibility::Infallible) {
-                            Ok(table) => table,
-                            Err(_) => hint::unreachable_unchecked(),
-                        };
+                    let new = Self::new_uninitialized(source.buckets(), Fallibility::Infallible)
+                        .unwrap_unchecked();
                     // Replace the old self with new uninitialized one. It's ok, since if something gets
                     // wrong `ScopeGuard` will initialize all control bytes and leave empty table.
                     **self_ = new;
