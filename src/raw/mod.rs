@@ -745,11 +745,7 @@ impl RawTable {
         unsafe {
             // SAFETY: The caller ensures that the control bytes of the `RawTable`
             //    are already initialized.
-            self.reserve_rehash_inner(
-                additional,
-                &|table, index| hasher(table.bucket_inner(index).as_ref()),
-                fallibility,
-            )
+            self.reserve_rehash_inner(additional, &hasher, fallibility)
         }
     }
 
@@ -790,11 +786,7 @@ impl RawTable {
         // 1. The caller of this function guarantees that `capacity >= self.items`.
         // 2. The caller ensures that the control bytes of the `RawTable`
         //    are already initialized.
-        self.resize_inner(
-            capacity,
-            &|table, index| hasher(table.bucket_inner(index).as_ref()),
-            fallibility,
-        )
+        self.resize_inner(capacity, &hasher, fallibility)
     }
 
     /// Inserts a new element into the table, and returns its raw bucket.
@@ -874,9 +866,7 @@ impl RawTable {
             // 3. The `find_or_find_insert_slot_inner` function returns the `index` of only the full bucket,
             //    which is in the range `0..self.buckets()` (since there is at least one empty `bucket` in
             //    the table), so calling `self.bucket(index)` and `Bucket::as_ref` is safe.
-            match self
-                .find_or_find_insert_slot_inner(hash, &mut |index| eq(self.bucket(index).as_ref()))
-            {
+            match self.find_or_find_insert_slot_inner(hash, &mut eq) {
                 // SAFETY: See explanation above.
                 Ok(index) => Ok(self.bucket(index)),
                 Err(slot) => Err(slot),
@@ -917,7 +907,7 @@ impl RawTable {
             // 1. The `find_inner` function returns the `index` of only the full bucket, which is in
             //    the range `0..self.buckets()`, so calling `self.bucket(index)` and `Bucket::as_ref`
             //    is safe.
-            let result = self.find_inner(hash, &mut |index| eq(self.bucket(index).as_ref()));
+            let result = self.find_inner(hash, &mut eq);
 
             // Avoid `Option::map` because it bloats LLVM IR.
             match result {
@@ -1258,12 +1248,12 @@ impl RawTable {
     /// changes to the `items` or `growth_left` field of the table.
     ///
     /// The table must have at least 1 empty or deleted `bucket`, otherwise, if the
-    /// `eq: &mut dyn FnMut(usize) -> bool` function does not return `true`, this function
+    /// `eq: &mut dyn FnMut(&usize) -> bool` function does not return `true`, this function
     /// will never return (will go into an infinite loop) for tables larger than the group
     /// width, or return an index outside of the table indices range if the table is less
     /// than the group width.
     ///
-    /// This function is guaranteed to provide the `eq: &mut dyn FnMut(usize) -> bool`
+    /// This function is guaranteed to provide the `eq: &mut dyn FnMut(&usize) -> bool`
     /// function with only `FULL` buckets' indices and return the `index` of the found
     /// element (as `Ok(index)`). If the element is not found and there is at least 1
     /// empty or deleted [`Bucket`] in the table, the function is guaranteed to return
@@ -1287,7 +1277,7 @@ impl RawTable {
     unsafe fn find_or_find_insert_slot_inner(
         &self,
         hash: u64,
-        eq: &mut dyn FnMut(usize) -> bool,
+        eq: &mut dyn FnMut(&usize) -> bool,
     ) -> Result<usize, InsertSlot> {
         let mut insert_slot = None;
 
@@ -1315,7 +1305,7 @@ impl RawTable {
             for bit in group.match_byte(h2_hash) {
                 let index = (probe_seq.pos + bit) & self.bucket_mask;
 
-                if likely(eq(index)) {
+                if likely(eq(self.bucket(index).as_ref())) {
                     return Ok(index);
                 }
             }
@@ -1483,10 +1473,10 @@ impl RawTable {
     /// changes to the `items` or `growth_left` field of the table.
     ///
     /// The table must have at least 1 empty `bucket`, otherwise, if the
-    /// `eq: &mut dyn FnMut(usize) -> bool` function does not return `true`,
+    /// `eq: &mut dyn FnMut(&usize) -> bool` function does not return `true`,
     /// this function will also never return (will go into an infinite loop).
     ///
-    /// This function is guaranteed to provide the `eq: &mut dyn FnMut(usize) -> bool`
+    /// This function is guaranteed to provide the `eq: &mut dyn FnMut(&usize) -> bool`
     /// function with only `FULL` buckets' indices and return the `index` of the found
     /// element as `Some(index)`, so the index will always be in the range
     /// `0..self.buckets()`.
@@ -1498,7 +1488,7 @@ impl RawTable {
     ///
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline(always)]
-    unsafe fn find_inner(&self, hash: u64, eq: &mut dyn FnMut(usize) -> bool) -> Option<usize> {
+    unsafe fn find_inner(&self, hash: u64, eq: &mut dyn FnMut(&usize) -> bool) -> Option<usize> {
         let h2_hash = h2(hash);
         let mut probe_seq = self.probe_seq(hash);
 
@@ -1524,7 +1514,7 @@ impl RawTable {
                 // of buckets is a power of two, and `self.bucket_mask = self.buckets() - 1`.
                 let index = (probe_seq.pos + bit) & self.bucket_mask;
 
-                if likely(eq(index)) {
+                if likely(eq(self.bucket(index).as_ref())) {
                     return Some(index);
                 }
             }
@@ -2040,7 +2030,7 @@ impl RawTable {
     unsafe fn reserve_rehash_inner(
         &mut self,
         additional: usize,
-        hasher: &dyn Fn(&mut Self, usize) -> u64,
+        hasher: &dyn Fn(&usize) -> u64,
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         // Avoid `Option::ok_or_else` because it bloats LLVM IR.
@@ -2163,7 +2153,7 @@ impl RawTable {
     unsafe fn resize_inner(
         &mut self,
         capacity: usize,
-        hasher: &dyn Fn(&mut Self, usize) -> u64,
+        hasher: &dyn Fn(&usize) -> u64,
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         debug_assert!(self.items <= capacity);
@@ -2176,7 +2166,7 @@ impl RawTable {
         // function ensures that the control bytes are properly initialized.
         for full_byte_index in self.full_buckets_indices() {
             // This may panic.
-            let hash = hasher(self, full_byte_index);
+            let hash = hasher(self.bucket_inner(full_byte_index).as_ref());
 
             // SAFETY:
             // We can use a simpler version of insert() here since:
@@ -2241,7 +2231,7 @@ impl RawTable {
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    unsafe fn rehash_in_place(&mut self, hasher: &dyn Fn(&mut Self, usize) -> u64) {
+    unsafe fn rehash_in_place(&mut self, hasher: &dyn Fn(&usize) -> u64) {
         // If the hash function panics then properly clean up any elements
         // that we haven't rehashed yet. We unfortunately can't preserve the
         // element since we lost their hash and have no way of recovering it
@@ -2264,7 +2254,7 @@ impl RawTable {
 
             'inner: loop {
                 // Hash the current item
-                let hash = hasher(*guard, i);
+                let hash = hasher(guard.bucket_inner(i).as_ref());
 
                 // Search for a suitable place to put it
                 //
@@ -2970,7 +2960,7 @@ mod test_map {
 
     fn rehash_in_place(table: &mut RawTable, hasher: impl Fn(&usize) -> u64) {
         unsafe {
-            table.rehash_in_place(&|table, index| hasher(table.bucket_inner(index).as_ref()));
+            table.rehash_in_place(&hasher);
         }
     }
 
