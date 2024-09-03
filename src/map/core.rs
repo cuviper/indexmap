@@ -32,8 +32,8 @@ pub(crate) struct IndexMapCore<K, V> {
 }
 
 #[inline(always)]
-fn get_hash<K, V>(entries: &[Bucket<K, V>]) -> impl Fn(usize) -> u64 + '_ {
-    move |i| entries[i].hash.get()
+fn get_hash<K, V>(entries: &[Bucket<K, V>]) -> impl Fn(usize) -> HashValue + '_ {
+    move |i| entries[i].hash
 }
 
 #[inline]
@@ -46,14 +46,14 @@ fn equivalent<'a, K, V, Q: ?Sized + Equivalent<K>>(
 
 #[inline]
 fn erase_index(table: &mut RawTable, hash: HashValue, index: usize) {
-    let erased = table.erase_entry(hash.get(), move |i| i == index);
+    let erased = table.erase_entry(hash, move |i| i == index);
     debug_assert!(erased);
 }
 
 #[inline]
 fn update_index(table: &mut RawTable, hash: HashValue, old: usize, new: usize) {
     let index = table
-        .get_mut(hash.get(), move |i| i == old)
+        .get_mut(hash, move |i| i == old)
         .expect("index not found");
     *index = new;
 }
@@ -325,7 +325,7 @@ impl<K, V> IndexMapCore<K, V> {
         Q: ?Sized + Equivalent<K>,
     {
         let eq = equivalent(key, &self.entries);
-        self.indices.get(hash.get(), eq)
+        self.indices.get(hash, eq)
     }
 
     pub(crate) fn insert_full(&mut self, hash: HashValue, key: K, value: V) -> (usize, Option<V>)
@@ -371,7 +371,7 @@ impl<K, V> IndexMapCore<K, V> {
 
     fn insert_unique(&mut self, hash: HashValue, key: K, value: V) -> usize {
         let i = self.indices.len();
-        self.indices.insert(hash.get(), i, get_hash(&self.entries));
+        self.indices.insert(hash, i, get_hash(&self.entries));
         debug_assert_eq!(i, self.entries.len());
         self.push_entry(hash, key, value);
         i
@@ -383,11 +383,11 @@ impl<K, V> IndexMapCore<K, V> {
         // Increment others first so we don't have duplicate indices.
         self.increment_indices(index, end);
         let entries = &*self.entries;
-        self.indices.insert(hash.get(), index, move |i| {
+        self.indices.insert(hash, index, move |i| {
             // Adjust for the incremented indices to find hashes.
             debug_assert_ne!(i, index);
             let i = if i < index { i } else { i - 1 };
-            entries[i].hash.get()
+            entries[i].hash
         });
         self.insert_entry(index, hash, key, value);
     }
@@ -398,7 +398,7 @@ impl<K, V> IndexMapCore<K, V> {
         Q: ?Sized + Equivalent<K>,
     {
         let eq = equivalent(key, &self.entries);
-        match self.indices.remove_entry(hash.get(), eq) {
+        match self.indices.remove_entry(hash, eq) {
             Some(index) => {
                 let (key, value) = self.shift_remove_finish(index);
                 Some((index, key, value))
@@ -505,10 +505,13 @@ impl<K, V> IndexMapCore<K, V> {
         // and then we expect to find it in the table as well.
         let [ref_a, ref_b] = self
             .indices
-            .get_many_mut(
-                [self.entries[a].hash.get(), self.entries[b].hash.get()],
-                move |i, x| if i == 0 { x == a } else { x == b },
-            )
+            .get_many_mut([self.entries[a].hash, self.entries[b].hash], move |i, x| {
+                if i == 0 {
+                    x == a
+                } else {
+                    x == b
+                }
+            })
             .expect("indices not found");
 
         mem::swap(ref_a, ref_b);
@@ -521,7 +524,7 @@ impl<K, V> IndexMapCore<K, V> {
         Q: ?Sized + Equivalent<K>,
     {
         let eq = equivalent(key, &self.entries);
-        match self.indices.remove_entry(hash.get(), eq) {
+        match self.indices.remove_entry(hash, eq) {
             Some(index) => {
                 let (key, value) = self.swap_remove_finish(index);
                 Some((index, key, value))

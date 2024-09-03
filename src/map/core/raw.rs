@@ -14,7 +14,7 @@ pub(super) fn insert_bulk_no_grow<K, V>(indices: &mut RawTable, entries: &[Bucke
     for entry in entries {
         // SAFETY: we asserted that sufficient capacity exists for all entries.
         unsafe {
-            indices.insert_no_grow(entry.hash.get(), indices.len());
+            indices.insert_no_grow(entry.hash, indices.len());
         }
     }
 }
@@ -58,7 +58,6 @@ impl<K, V> IndexMapCore<K, V> {
     where
         K: Eq,
     {
-        let hash = hash.get();
         let eq = equivalent(key, &self.entries);
         let hasher = get_hash(&self.entries);
         // SAFETY: We're not mutating between find and read/insert.
@@ -81,7 +80,7 @@ impl<K, V> IndexMapCore<K, V> {
     ) -> Result<RawTableEntry<'_, K, V>, &mut Self> {
         let entries = &*self.entries;
         let eq = move |i: usize| is_match(&entries[i].key);
-        match self.indices.find(hash.get(), eq) {
+        match self.indices.find(hash, eq) {
             // SAFETY: The bucket is valid because we *just* found it in this map.
             Some(raw_bucket) => Ok(unsafe { RawTableEntry::new(self, raw_bucket) }),
             None => Err(self),
@@ -90,7 +89,7 @@ impl<K, V> IndexMapCore<K, V> {
 
     pub(super) fn index_raw_entry(&mut self, index: usize) -> Option<RawTableEntry<'_, K, V>> {
         let hash = self.entries.get(index)?.hash;
-        let raw_bucket = self.indices.find(hash.get(), move |i| i == index)?;
+        let raw_bucket = self.indices.find(hash, move |i| i == index)?;
         // SAFETY: The bucket is valid because we *just* found it in this map.
         Some(unsafe { RawTableEntry::new(self, raw_bucket) })
     }

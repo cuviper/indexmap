@@ -1,4 +1,4 @@
-use crate::TryReserveError;
+use crate::{HashValue, TryReserveError};
 use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout, LayoutError};
 use core::iter::FusedIterator;
 use core::mem::{self, MaybeUninit};
@@ -104,31 +104,28 @@ fn special_is_empty(ctrl: u8) -> bool {
     ctrl & 0x01 != 0
 }
 
-/// Primary hash function, used to select the initial bucket to probe from.
-#[inline]
-#[allow(clippy::cast_possible_truncation)]
-fn h1(hash: u64) -> usize {
-    // On 32-bit platforms we simply ignore the higher hash bits.
-    hash as usize
-}
+impl HashValue {
+    /// Primary hash function, used to select the initial bucket to probe from.
+    #[inline(always)]
+    fn h1(self, mask: usize) -> usize {
+        self.0 & mask
+    }
 
-// Constant for h2 function that grabing the top 7 bits of the hash.
-const MIN_HASH_LEN: usize = if mem::size_of::<usize>() < mem::size_of::<u64>() {
-    mem::size_of::<usize>()
-} else {
-    mem::size_of::<u64>()
-};
-
-/// Secondary hash function, saved in the low 7 bits of the control byte.
-#[inline]
-#[allow(clippy::cast_possible_truncation)]
-fn h2(hash: u64) -> u8 {
-    // Grab the top 7 bits of the hash. While the hash is normally a full 64-bit
-    // value, some hash functions (such as FxHash) produce a usize result
-    // instead, which means that the top 32 bits are 0 on 32-bit platforms.
-    // So we use MIN_HASH_LEN constant to handle this.
-    let top7 = hash >> (MIN_HASH_LEN * 8 - 7);
-    (top7 & 0x7f) as u8 // truncation
+    /// Secondary hash function, saved in the low 7 bits of the control byte.
+    #[inline(always)]
+    #[allow(clippy::cast_possible_truncation)]
+    fn h2(self) -> u8 {
+        // Grab the top 7 bits of the hash. While the hash is normally a full 64-bit
+        // value, some hash functions (such as FxHash) produce a usize result
+        // instead, which means that the top 32 bits are 0 on 32-bit platforms.
+        const SHIFT: u32 = if usize::BITS < u64::BITS {
+            usize::BITS
+        } else {
+            u64::BITS
+        } - 7;
+        let top7 = self.0 >> SHIFT;
+        (top7 & 0x7f) as u8 // truncation
+    }
 }
 
 /// Probe sequence based on triangular numbers, which is guaranteed (since our
@@ -531,7 +528,7 @@ impl RawTable {
     /// Finds and erases an element from the table.
     /// Returns true if an element was found.
     #[inline]
-    pub(crate) fn erase_entry(&mut self, hash: u64, eq: impl FnMut(usize) -> bool) -> bool {
+    pub(crate) fn erase_entry(&mut self, hash: HashValue, eq: impl FnMut(usize) -> bool) -> bool {
         // Avoid `Option::map` because it bloats LLVM IR.
         if let Some(bucket) = self.find(hash, eq) {
             unsafe {
@@ -558,7 +555,7 @@ impl RawTable {
     #[inline]
     pub(crate) fn remove_entry(
         &mut self,
-        hash: u64,
+        hash: HashValue,
         eq: impl FnMut(usize) -> bool,
     ) -> Option<usize> {
         // Avoid `Option::map` because it bloats LLVM IR.
@@ -580,7 +577,7 @@ impl RawTable {
 
     /// Shrinks the table to fit `max(self.len(), min_size)` elements.
     #[inline]
-    pub(crate) fn shrink_to(&mut self, min_size: usize, hasher: impl Fn(usize) -> u64) {
+    pub(crate) fn shrink_to(&mut self, min_size: usize, hasher: impl Fn(usize) -> HashValue) {
         // Calculate the minimal number of elements that we need to reserve
         // space for.
         let min_size = usize::max(self.items, min_size);
@@ -622,7 +619,7 @@ impl RawTable {
     /// Ensures that at least `additional` items can be inserted into the table
     /// without reallocation.
     #[inline]
-    pub(crate) fn reserve(&mut self, additional: usize, hasher: impl Fn(usize) -> u64) {
+    pub(crate) fn reserve(&mut self, additional: usize, hasher: impl Fn(usize) -> HashValue) {
         if unlikely(additional > self.growth_left) {
             // Avoid `Result::unwrap_or_else` because it bloats LLVM IR.
             unsafe {
@@ -643,7 +640,7 @@ impl RawTable {
     pub(crate) fn try_reserve(
         &mut self,
         additional: usize,
-        hasher: impl Fn(usize) -> u64,
+        hasher: impl Fn(usize) -> HashValue,
     ) -> Result<(), TryReserveError> {
         if additional > self.growth_left {
             // SAFETY: The [`RawTable`] must already have properly initialized control
@@ -667,7 +664,7 @@ impl RawTable {
     unsafe fn reserve_rehash(
         &mut self,
         additional: usize,
-        hasher: impl Fn(usize) -> u64,
+        hasher: impl Fn(usize) -> HashValue,
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         unsafe {
@@ -707,7 +704,7 @@ impl RawTable {
     unsafe fn resize(
         &mut self,
         capacity: usize,
-        hasher: impl Fn(usize) -> u64,
+        hasher: impl Fn(usize) -> HashValue,
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         // SAFETY:
@@ -723,9 +720,9 @@ impl RawTable {
     #[inline]
     pub(crate) fn insert(
         &mut self,
-        hash: u64,
+        hash: HashValue,
         value: usize,
-        hasher: impl Fn(usize) -> u64,
+        hasher: impl Fn(usize) -> HashValue,
     ) -> Bucket {
         unsafe {
             // SAFETY:
@@ -758,7 +755,7 @@ impl RawTable {
     ///
     /// This does not check if the given element already exists in the table.
     #[inline]
-    pub(crate) unsafe fn insert_no_grow(&mut self, hash: u64, value: usize) -> Bucket {
+    pub(crate) unsafe fn insert_no_grow(&mut self, hash: HashValue, value: usize) -> Bucket {
         let (index, old_ctrl) = self.prepare_insert_slot(hash);
         let bucket = self.bucket(index);
 
@@ -780,9 +777,9 @@ impl RawTable {
     #[inline]
     pub(crate) fn find_or_find_insert_slot(
         &mut self,
-        hash: u64,
+        hash: HashValue,
         mut eq: impl FnMut(usize) -> bool,
-        hasher: impl Fn(usize) -> u64,
+        hasher: impl Fn(usize) -> HashValue,
     ) -> Result<Bucket, InsertSlot> {
         self.reserve(1, hasher);
 
@@ -813,7 +810,7 @@ impl RawTable {
     #[inline]
     pub(crate) unsafe fn insert_in_slot(
         &mut self,
-        hash: u64,
+        hash: HashValue,
         slot: InsertSlot,
         value: usize,
     ) -> Bucket {
@@ -827,7 +824,11 @@ impl RawTable {
 
     /// Searches for an element in the table.
     #[inline]
-    pub(crate) fn find(&self, hash: u64, mut eq: impl FnMut(usize) -> bool) -> Option<Bucket> {
+    pub(crate) fn find(
+        &self,
+        hash: HashValue,
+        mut eq: impl FnMut(usize) -> bool,
+    ) -> Option<Bucket> {
         unsafe {
             // SAFETY:
             // 1. The [`RawTable`] must already have properly initialized control bytes since we
@@ -848,7 +849,7 @@ impl RawTable {
 
     /// Gets a reference to an element in the table.
     #[inline]
-    pub(crate) fn get(&self, hash: u64, eq: impl FnMut(usize) -> bool) -> Option<usize> {
+    pub(crate) fn get(&self, hash: HashValue, eq: impl FnMut(usize) -> bool) -> Option<usize> {
         // Avoid `Option::map` because it bloats LLVM IR.
         match self.find(hash, eq) {
             Some(bucket) => Some(unsafe { bucket.read() }),
@@ -860,7 +861,7 @@ impl RawTable {
     #[inline]
     pub(crate) fn get_mut(
         &mut self,
-        hash: u64,
+        hash: HashValue,
         eq: impl FnMut(usize) -> bool,
     ) -> Option<&mut usize> {
         // Avoid `Option::map` because it bloats LLVM IR.
@@ -881,7 +882,7 @@ impl RawTable {
     /// the `i`th key to be looked up.
     pub(crate) fn get_many_mut<const N: usize>(
         &mut self,
-        hashes: [u64; N],
+        hashes: [HashValue; N],
         eq: impl FnMut(usize, usize) -> bool,
     ) -> Option<[&'_ mut usize; N]> {
         unsafe {
@@ -902,7 +903,7 @@ impl RawTable {
 
     unsafe fn get_many_mut_pointers<const N: usize>(
         &mut self,
-        hashes: [u64; N],
+        hashes: [HashValue; N],
         mut eq: impl FnMut(usize, usize) -> bool,
     ) -> Option<[*mut usize; N]> {
         // TODO use `MaybeUninit::uninit_array` here instead once that's stable.
@@ -1178,12 +1179,12 @@ impl RawTable {
     #[inline]
     unsafe fn find_or_find_insert_slot_inner(
         &self,
-        hash: u64,
+        hash: HashValue,
         eq: &mut dyn FnMut(usize) -> bool,
     ) -> Result<usize, InsertSlot> {
         let mut insert_slot = None;
 
-        let h2_hash = h2(hash);
+        let h2_hash = hash.h2();
         let mut probe_seq = self.probe_seq(hash);
 
         loop {
@@ -1290,7 +1291,7 @@ impl RawTable {
     /// [`RawTable::set_ctrl_h2`]: RawTable::set_ctrl_h2
     /// [`RawTable::find_insert_slot`]: RawTable::find_insert_slot
     #[inline]
-    unsafe fn prepare_insert_slot(&mut self, hash: u64) -> (usize, u8) {
+    unsafe fn prepare_insert_slot(&mut self, hash: HashValue) -> (usize, u8) {
         // SAFETY: Caller of this function ensures that the control bytes are properly initialized.
         let index: usize = self.find_insert_slot(hash).index;
         // SAFETY:
@@ -1333,7 +1334,7 @@ impl RawTable {
     ///
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    unsafe fn find_insert_slot(&self, hash: u64) -> InsertSlot {
+    unsafe fn find_insert_slot(&self, hash: HashValue) -> InsertSlot {
         let mut probe_seq = self.probe_seq(hash);
         loop {
             // SAFETY:
@@ -1390,8 +1391,12 @@ impl RawTable {
     ///
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline(always)]
-    unsafe fn find_inner(&self, hash: u64, eq: &mut dyn FnMut(usize) -> bool) -> Option<usize> {
-        let h2_hash = h2(hash);
+    unsafe fn find_inner(
+        &self,
+        hash: HashValue,
+        eq: &mut dyn FnMut(usize) -> bool,
+    ) -> Option<usize> {
+        let h2_hash = hash.h2();
         let mut probe_seq = self.probe_seq(hash);
 
         loop {
@@ -1705,24 +1710,24 @@ impl RawTable {
     /// group exactly once. The loop using `probe_seq` must terminate upon
     /// reaching a group containing an empty bucket.
     #[inline]
-    fn probe_seq(&self, hash: u64) -> ProbeSeq {
+    fn probe_seq(&self, hash: HashValue) -> ProbeSeq {
         ProbeSeq {
             // This is the same as `hash as usize % self.buckets()` because the number
             // of buckets is a power of two, and `self.bucket_mask = self.buckets() - 1`.
-            pos: h1(hash) & self.bucket_mask,
+            pos: hash.h1(self.bucket_mask),
             stride: 0,
         }
     }
 
     #[inline]
-    unsafe fn record_item_insert_at(&mut self, index: usize, old_ctrl: u8, hash: u64) {
+    unsafe fn record_item_insert_at(&mut self, index: usize, old_ctrl: u8, hash: HashValue) {
         self.growth_left -= usize::from(special_is_empty(old_ctrl));
         self.set_ctrl_h2(index, hash);
         self.items += 1;
     }
 
     #[inline]
-    fn is_in_same_group(&self, i: usize, new_i: usize, hash: u64) -> bool {
+    fn is_in_same_group(&self, i: usize, new_i: usize, hash: HashValue) -> bool {
         let probe_seq_pos = self.probe_seq(hash).pos;
         let probe_index =
             |pos: usize| (pos.wrapping_sub(probe_seq_pos) & self.bucket_mask) / Group::WIDTH;
@@ -1757,9 +1762,9 @@ impl RawTable {
     /// [`Bucket::as_ptr`]: Bucket::as_ptr
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    unsafe fn set_ctrl_h2(&mut self, index: usize, hash: u64) {
+    unsafe fn set_ctrl_h2(&mut self, index: usize, hash: HashValue) {
         // SAFETY: The caller must uphold the safety rules for the [`RawTable::set_ctrl_h2`]
-        self.set_ctrl(index, h2(hash));
+        self.set_ctrl(index, hash.h2());
     }
 
     /// Replaces the hash in the control byte at the given index with the provided one,
@@ -1791,7 +1796,7 @@ impl RawTable {
     /// [`Bucket::as_ptr`]: Bucket::as_ptr
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    unsafe fn replace_ctrl_h2(&mut self, index: usize, hash: u64) -> u8 {
+    unsafe fn replace_ctrl_h2(&mut self, index: usize, hash: HashValue) -> u8 {
         // SAFETY: The caller must uphold the safety rules for the [`RawTable::replace_ctrl_h2`]
         let prev_ctrl = *self.ctrl(index);
         self.set_ctrl_h2(index, hash);
@@ -1927,7 +1932,7 @@ impl RawTable {
     unsafe fn reserve_rehash_inner(
         &mut self,
         additional: usize,
-        hasher: &dyn Fn(usize) -> u64,
+        hasher: &dyn Fn(usize) -> HashValue,
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         // Avoid `Option::ok_or_else` because it bloats LLVM IR.
@@ -2050,7 +2055,7 @@ impl RawTable {
     unsafe fn resize_inner(
         &mut self,
         capacity: usize,
-        hasher: &dyn Fn(usize) -> u64,
+        hasher: &dyn Fn(usize) -> HashValue,
         fallibility: Fallibility,
     ) -> Result<(), TryReserveError> {
         debug_assert!(self.items <= capacity);
@@ -2128,7 +2133,7 @@ impl RawTable {
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[allow(clippy::inline_always)]
     #[inline(always)]
-    unsafe fn rehash_in_place(&mut self, hasher: &dyn Fn(usize) -> u64) {
+    unsafe fn rehash_in_place(&mut self, hasher: &dyn Fn(usize) -> HashValue) {
         // If the hash function panics then properly clean up any elements
         // that we haven't rehashed yet. We unfortunately can't preserve the
         // element since we lost their hash and have no way of recovering it
@@ -2412,7 +2417,11 @@ impl RawTable {
     }
 
     /// Variant of `clone_from` to use when a hasher is available.
-    pub(crate) fn clone_from_with_hasher(&mut self, source: &Self, hasher: impl Fn(usize) -> u64) {
+    pub(crate) fn clone_from_with_hasher(
+        &mut self,
+        source: &Self,
+        hasher: impl Fn(usize) -> HashValue,
+    ) {
         // If we have enough capacity in the table, just clear it and insert
         // elements one by one. We don't do this if we have the same number of
         // buckets as the source since we can just copy the contents directly
@@ -2850,7 +2859,7 @@ impl FusedIterator for FullBucketsIndices {}
 mod test_map {
     use super::*;
 
-    fn rehash_in_place(table: &mut RawTable, hasher: impl Fn(usize) -> u64) {
+    fn rehash_in_place(table: &mut RawTable, hasher: impl Fn(usize) -> HashValue) {
         unsafe {
             table.rehash_in_place(&hasher);
         }
@@ -2859,25 +2868,31 @@ mod test_map {
     #[test]
     fn rehash() {
         let mut table = RawTable::new();
-        let hasher = |i: usize| i as u64;
+        let hasher = |i: usize| HashValue(i);
         for i in 0..100 {
-            table.insert(i as u64, i, hasher);
+            table.insert(HashValue(i), i, HashValue);
         }
 
         for i in 0..100 {
             unsafe {
-                assert_eq!(table.find(i as u64, |x| x == i).map(|b| b.read()), Some(i));
+                assert_eq!(
+                    table.find(HashValue(i), |x| x == i).map(|b| b.read()),
+                    Some(i)
+                );
             }
-            assert!(table.find(i as u64 + 100, |x| x == i + 100).is_none());
+            assert!(table.find(HashValue(i + 100), |x| x == i + 100).is_none());
         }
 
         rehash_in_place(&mut table, hasher);
 
         for i in 0..100 {
             unsafe {
-                assert_eq!(table.find(i as u64, |x| x == i).map(|b| b.read()), Some(i));
+                assert_eq!(
+                    table.find(HashValue(i), |x| x == i).map(|b| b.read()),
+                    Some(i)
+                );
             }
-            assert!(table.find(i as u64 + 100, |x| x == i + 100).is_none());
+            assert!(table.find(HashValue(i + 100), |x| x == i + 100).is_none());
         }
     }
 
