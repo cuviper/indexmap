@@ -522,56 +522,6 @@ impl RawTable {
         bucket.to_base_index(self.data_end())
     }
 
-    /// Returns a pointer to an element in the table.
-    ///
-    /// The caller must ensure that the `RawTable` outlives the returned [`Bucket`],
-    /// otherwise using it may result in [`undefined behavior`].
-    ///
-    /// # Safety
-    ///
-    /// The caller of this function must observe the following safety rules:
-    ///
-    /// * The table must already be allocated;
-    ///
-    /// * The `index` must not be greater than the number returned by the [`RawTable::buckets`]
-    ///   function, i.e. `(index + 1) <= self.buckets()`.
-    ///
-    /// It is safe to call this function with index of zero (`index == 0`) on a table that has
-    /// not been allocated, but using the returned [`Bucket`] results in [`undefined behavior`].
-    ///
-    /// [`RawTable::buckets`]: RawTable::buckets
-    /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
-    #[inline]
-    unsafe fn bucket(&self, index: usize) -> Bucket {
-        // Return a pointer to the `element` in the `data part` of the table
-        // (we start counting from "0", so that in the expression T[n], the "n" index actually one less than
-        // the "buckets" number of our `RawTable`, i.e. "n = RawTable::buckets() - 1"):
-        //
-        //           `table.bucket(3).as_ptr()` returns a pointer that points here in the `data`
-        //           part of the `RawTable`, i.e. to the start of T3 (see `Bucket::as_ptr`)
-        //                  |
-        //                  |               `base = self.data_end()` points here
-        //                  |               (to the start of CT0 or to the end of T0)
-        //                  v                 v
-        // [Pad], T_n, ..., |T3|, T2, T1, T0, |CT0, CT1, CT2, CT3, ..., CT_n, CTa_0, CTa_1, ..., CTa_m
-        //                     ^                                              \__________  __________/
-        //        `table.bucket(3)` returns a pointer that points                        \/
-        //         here in the `data` part of the `RawTable` (to              additional control bytes
-        //         the end of T3)                                              `m = Group::WIDTH - 1`
-        //
-        // where: T0...T_n  - our stored data;
-        //        CT0...CT_n - control bytes or metadata for `data`;
-        //        CTa_0...CTa_m - additional control bytes (so that the search with loading `Group` bytes from
-        //                        the heap works properly, even if the result of `h1(hash) & self.bucket_mask`
-        //                        is equal to `self.bucket_mask`). See also `RawTable::set_ctrl` function.
-        //
-        // P.S. `h1(hash) & self.bucket_mask` is the same as `hash as usize % self.buckets()` because the number
-        // of buckets is a power of two, and `self.bucket_mask = self.buckets() - 1`.
-        debug_assert_ne!(self.bucket_mask, 0);
-        debug_assert!(index < self.buckets());
-        Bucket::from_base_index(self.data_end(), index)
-    }
-
     /// Erases an element from the table.
     #[inline]
     #[allow(clippy::needless_pass_by_value)]
@@ -818,7 +768,7 @@ impl RawTable {
     #[inline]
     pub(crate) unsafe fn insert_no_grow(&mut self, hash: u64, value: usize) -> Bucket {
         let (index, old_ctrl) = self.prepare_insert_slot(hash);
-        let bucket = self.bucket_inner(index);
+        let bucket = self.bucket(index);
 
         // If we are replacing a DELETED entry then we don't need to update
         // the load counter.
@@ -1687,7 +1637,7 @@ impl RawTable {
     /// [`RawTable::buckets`]: RawTable::buckets
     /// [`undefined behavior`]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
-    unsafe fn bucket_inner(&self, index: usize) -> Bucket {
+    unsafe fn bucket(&self, index: usize) -> Bucket {
         debug_assert_ne!(self.bucket_mask, 0);
         debug_assert!(index < self.buckets());
         Bucket::from_base_index(self.data_end(), index)
@@ -2147,7 +2097,7 @@ impl RawTable {
         // function ensures that the control bytes are properly initialized.
         for full_byte_index in self.full_buckets_indices() {
             // This may panic.
-            let hash = hasher(self.bucket_inner(full_byte_index).read());
+            let hash = hasher(self.bucket(full_byte_index).read());
 
             // SAFETY:
             // We can use a simpler version of insert() here since:
@@ -2235,7 +2185,7 @@ impl RawTable {
 
             'inner: loop {
                 // Hash the current item
-                let hash = hasher(guard.bucket_inner(i).read());
+                let hash = hasher(guard.bucket(i).read());
 
                 // Search for a suitable place to put it
                 //
