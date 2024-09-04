@@ -1,3 +1,4 @@
+#![allow(unsafe_op_in_unsafe_fn)]
 use crate::{HashValue, TryReserveError};
 use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout, LayoutError};
 use core::iter::FusedIterator;
@@ -545,10 +546,10 @@ impl RawTable {
     /// This also returns an `InsertSlot` pointing to the newly free bucket.
     #[inline]
     #[allow(clippy::needless_pass_by_value)]
-    pub(crate) unsafe fn remove(&mut self, item: Bucket) -> (usize, InsertSlot) {
+    pub(crate) unsafe fn remove(&mut self, item: Bucket) -> usize {
         let index = self.bucket_index(&item);
         self.erase_bucket_index(index);
-        (item.read(), InsertSlot { index })
+        item.read()
     }
 
     /// Finds and removes an element from the table, returning it.
@@ -560,7 +561,7 @@ impl RawTable {
     ) -> Option<usize> {
         // Avoid `Option::map` because it bloats LLVM IR.
         match self.find(hash, eq) {
-            Some(bucket) => Some(unsafe { self.remove(bucket).0 }),
+            Some(bucket) => Some(unsafe { self.remove(bucket) }),
             None => None,
         }
     }

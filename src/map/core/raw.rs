@@ -145,7 +145,7 @@ impl<'a, K, V> RawTableEntry<'a, K, V> {
     pub(super) fn remove_index(self) -> (&'a mut IndexMapCore<K, V>, usize) {
         // SAFETY: This is safe because it can only happen once (self is consumed)
         // and map.indices have not been modified since entry construction
-        let (index, _slot) = unsafe { self.map.indices.remove(self.raw_bucket) };
+        let index = unsafe { self.map.indices.remove(self.raw_bucket) };
         (self.map, index)
     }
 
